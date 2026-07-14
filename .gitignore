@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Build output
+dist/
+build/
+.vite/
+coverage/
+
+# Prisma
+backend/prisma/*.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Mobile
+mobile/**/node_modules/
+mobile/**/.expo/
+mobile/**/android/app/build/
+mobile/**/ios/Pods/

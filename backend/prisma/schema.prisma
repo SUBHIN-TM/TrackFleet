@@ -1,0 +1,440 @@
+// ============================================================================
+// TrackFleet — Database Schema (PostgreSQL + Prisma)
+// Multi-tenant vehicle tracking SaaS. Schools-first, but table names are
+// GENERIC (passenger/guardian/trip) so hospital/company verticals can be
+// added later by only swapping display labels — never rename these tables.
+//
+// GOLDEN RULES baked into this schema:
+//   1. Tenancy: almost every table has `tenantId`. Every query MUST filter by it.
+//   2. Append-only: TripEvent + LocationPoint are INSERT-only. Never UPDATE them.
+//   3. Auth: email + password for everyone (super admin, tenant admin, parent,
+//      driver). Passwords are bcrypt-hashed — never stored in plain text.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// ENUMS
+// ----------------------------------------------------------------------------
+
+enum Vertical {
+  SCHOOL
+  HOSPITAL
+  COMPANY
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+}
+
+// Role decides which app a user can log into and what they can do.
+enum Role {
+  SUPER_ADMIN // you — the platform owner (no tenant)
+  TENANT_ADMIN // school admin — manages their org
+  DRIVER // mobile app — streams GPS + scans boarding
+  GUARDIAN // parent web app — tracks their child
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+enum RouteDirection {
+  PICKUP // morning: home -> school
+  DROP // evening: school -> home
+  BOTH
+}
+
+enum TripStatus {
+  SCHEDULED
+  STARTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  INTERRUPTED // breakdown / emergency
+}
+
+// Passenger status DURING a trip (lives on TripPassenger, not the passenger).
+enum BoardingStatus {
+  EXPECTED // on the list, not yet boarded
+  ONBOARD // scanned/marked in
+  NO_SHOW // never boarded
+  DROPPED // scanned out at their stop
+  ABSENT // marked absent before the trip
+}
+
+// Append-only event types written during a trip.
+enum TripEventType {
+  TRIP_START
+  ARRIVE_STOP
+  DEPART_STOP
+  SCAN_IN // passenger boarded (QR)
+  MANUAL_IN // passenger boarded (manual tap)
+  SCAN_OUT // passenger dropped
+  NO_SHOW
+  SOS
+  SWEEP_OVERRIDE // driver ended trip with someone still onboard
+  TRIP_END
+}
+
+enum VerificationMethod {
+  QR
+  MANUAL
+}
+
+// ----------------------------------------------------------------------------
+// TENANCY & FEATURE FLAGS
+// ----------------------------------------------------------------------------
+
+model Tenant {
+  id        String       @id @default(cuid())
+  name      String
+  slug      String       @unique // subdomain e.g. "greenvalley"
+  vertical  Vertical     @default(SCHOOL)
+  logoUrl   String?
+  status    TenantStatus @default(TRIAL)
+
+  // Feature flags stored as JSON so you can flip what a tenant "bought"
+  // without a migration. e.g. { "parentApp": true, "sos": false, "eta": true }
+  features  Json         @default("{}")
+
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  users       User[]
+  vehicles    Vehicle[]
+  passengers  Passenger[]
+  routes      Route[]
+  schedules   TripSchedule[]
+  trips       Trip[]
+
+  @@index([status])
+}
+
+// ----------------------------------------------------------------------------
+// USERS & AUTH  (one table for every human; role decides capabilities)
+// ----------------------------------------------------------------------------
+
+model User {
+  id           String     @id @default(cuid())
+  // Super admins have tenantId = null. Everyone else belongs to a tenant.
+  tenantId     String?
+  tenant       Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  role         Role
+  email        String
+  passwordHash String
+  name         String
+  phone        String?
+  status       UserStatus @default(ACTIVE)
+
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Role-specific extras
+  driverProfile  DriverProfile?
+  guardianLinks  GuardianPassenger[]
+  drivenTrips    Trip[]          @relation("TripDriver")
+  schedules      TripSchedule[]  @relation("ScheduleDriver")
+
+  // Email is unique per tenant (two tenants may share the same person's email
+  // conceptually, but for MVP we keep it simple: unique within a tenant scope).
+  @@unique([tenantId, email])
+  @@index([tenantId, role])
+}
+
+model DriverProfile {
+  id            String  @id @default(cuid())
+  userId        String  @unique
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  licenseNumber String?
+  photoUrl      String?
+  // Binds the app to one physical phone; admin can reset to allow re-login.
+  deviceId      String?
+}
+
+// ----------------------------------------------------------------------------
+// FLEET
+// ----------------------------------------------------------------------------
+
+model Vehicle {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  regNumber    String // license plate e.g. "KL-01-AB-1234"
+  capacity     Int      @default(40)
+  photoUrl     String?
+  insuranceExp DateTime?
+  active       Boolean  @default(true)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  schedules    TripSchedule[]
+  trips        Trip[]
+
+  @@unique([tenantId, regNumber])
+  @@index([tenantId])
+}
+
+// ----------------------------------------------------------------------------
+// PEOPLE (passengers = students, guardians = parents)
+// ----------------------------------------------------------------------------
+
+model Passenger {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String
+  grade       String? // "Class 5B" — generic label, means dept/ward in other verticals
+  photoUrl    String?
+
+  // Home location (geocoded from address at import) for "nearest stop" suggestion.
+  homeAddress String?
+  homeLat     Float?
+  homeLng     Float?
+
+  // Stable QR payload printed on the ID card. Signed token verified at scan time.
+  qrToken     String   @unique @default(cuid())
+
+  active      Boolean  @default(true) // archived/withdrawn passengers don't bill
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  guardians       GuardianPassenger[]
+  stopAssignments StopAssignment[]
+  tripPassengers  TripPassenger[]
+  absences        Absence[]
+
+  @@index([tenantId, active])
+}
+
+// Many-to-many: one guardian can have several children (siblings); a child can
+// have multiple guardians. Guardian is a User with role GUARDIAN.
+model GuardianPassenger {
+  id          String    @id @default(cuid())
+  guardianId  String
+  guardian    User      @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+  passengerId String
+  passenger   Passenger @relation(fields: [passengerId], references: [id], onDelete: Cascade)
+  relation    String?   // "Father", "Mother", "Guardian"
+
+  @@unique([guardianId, passengerId])
+  @@index([passengerId])
+}
+
+// ----------------------------------------------------------------------------
+// ROUTES & STOPS
+// ----------------------------------------------------------------------------
+
+model Route {
+  id         String         @id @default(cuid())
+  tenantId   String
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name       String // "Route 7 — Kazhakkoottam Line"
+  direction  RouteDirection @default(PICKUP)
+  active     Boolean        @default(true)
+
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  stops     Stop[]
+  schedules TripSchedule[]
+
+  @@index([tenantId, active])
+}
+
+model Stop {
+  id             String   @id @default(cuid())
+  routeId        String
+  route          Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  name           String
+  lat            Float
+  lng            Float
+  geofenceRadius Int      @default(150) // metres — arrival & "bus approaching"
+  scheduledTime  String? // "07:15" local time
+  sequence       Int // order along the route (drag-to-reorder in UI)
+
+  assignments StopAssignment[]
+
+  @@index([routeId, sequence])
+}
+
+// Which stop a passenger is picked up / dropped at.
+model StopAssignment {
+  id          String    @id @default(cuid())
+  stopId      String
+  stop        Stop      @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  passengerId String
+  passenger   Passenger @relation(fields: [passengerId], references: [id], onDelete: Cascade)
+
+  @@unique([stopId, passengerId])
+  @@index([passengerId])
+}
+
+// ----------------------------------------------------------------------------
+// SCHEDULING  (recurring plan) -> generates concrete Trips each day
+// ----------------------------------------------------------------------------
+
+model TripSchedule {
+  id         String         @id @default(cuid())
+  tenantId   String
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  routeId    String
+  route      Route          @relation(fields: [routeId], references: [id])
+  vehicleId  String
+  vehicle    Vehicle        @relation(fields: [vehicleId], references: [id])
+  driverId   String
+  driver     User           @relation("ScheduleDriver", fields: [driverId], references: [id])
+
+  direction  RouteDirection @default(PICKUP)
+  // Days it runs, e.g. [1,2,3,4,5,6] (Mon=1). Simple JSON for MVP.
+  daysOfWeek Json           @default("[1,2,3,4,5]")
+  startTime  String // "07:00"
+  active     Boolean        @default(true)
+
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  trips      Trip[]
+
+  @@index([tenantId, active])
+}
+
+// ----------------------------------------------------------------------------
+// TRIPS  (one concrete run on a given date)
+// ----------------------------------------------------------------------------
+
+model Trip {
+  id         String        @id @default(cuid())
+  tenantId   String
+  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  scheduleId String?
+  schedule   TripSchedule? @relation(fields: [scheduleId], references: [id])
+  routeId    String
+  vehicleId  String
+  vehicle    Vehicle       @relation(fields: [vehicleId], references: [id])
+  driverId   String
+  driver     User          @relation("TripDriver", fields: [driverId], references: [id])
+
+  direction  RouteDirection
+  serviceDate DateTime // the calendar day this trip belongs to
+  status     TripStatus    @default(SCHEDULED)
+  startedAt  DateTime?
+  endedAt    DateTime?
+
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  passengers     TripPassenger[]
+  events         TripEvent[]
+  locationPoints LocationPoint[]
+
+  @@index([tenantId, serviceDate])
+  @@index([driverId, status])
+}
+
+// Snapshot of who is expected on THIS trip + their live boarding status.
+// This is the driver's "expected list". Boarding status is mutable here.
+model TripPassenger {
+  id           String         @id @default(cuid())
+  tripId       String
+  trip         Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  passengerId  String
+  passenger    Passenger      @relation(fields: [passengerId], references: [id])
+
+  status       BoardingStatus @default(EXPECTED)
+  boardedAt    DateTime?
+  droppedAt    DateTime?
+  stopSequence Int? // which stop they board at, copied from assignment
+
+  @@unique([tripId, passengerId])
+  @@index([tripId, status])
+}
+
+// APPEND-ONLY. Every scan/arrival/SOS. Never UPDATE or DELETE. This is the
+// incorruptible audit trail — the "who was where when" record.
+model TripEvent {
+  id          String              @id @default(cuid())
+  tripId      String
+  trip        Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  type        TripEventType
+  passengerId String? // null for trip-level events (start/end/sos)
+  method      VerificationMethod? // QR vs MANUAL for boarding events
+  reason      String? // override reason, manual reason, etc.
+
+  // Geotag — where the event happened.
+  lat         Float?
+  lng         Float?
+
+  createdAt   DateTime            @default(now()) // the timestamp; never changes
+
+  @@index([tripId, createdAt])
+  @@index([passengerId])
+}
+
+// APPEND-ONLY GPS trail. High volume. Source flags phone vs future hardware.
+model LocationPoint {
+  id        String   @id @default(cuid())
+  tripId    String
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  lat       Float
+  lng       Float
+  speed     Float? // km/h
+  heading   Float? // degrees
+  source    String   @default("PHONE") // PHONE | GPS_DEVICE (future)
+  recordedAt DateTime // device timestamp (may differ from insert time if offline-buffered)
+  createdAt DateTime @default(now())
+
+  @@index([tripId, recordedAt])
+}
+
+// ----------------------------------------------------------------------------
+// ABSENCE & NOTIFICATIONS
+// ----------------------------------------------------------------------------
+
+model Absence {
+  id          String    @id @default(cuid())
+  passengerId String
+  passenger   Passenger @relation(fields: [passengerId], references: [id], onDelete: Cascade)
+  date        DateTime // the day the passenger will not travel
+  reason      String?
+  createdAt   DateTime  @default(now())
+
+  @@unique([passengerId, date])
+  @@index([date])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String // recipient (guardian or admin)
+  tenantId  String?
+  type      String // "TRIP_STARTED", "BOARDED", "NO_SHOW", "SOS"...
+  title     String
+  body      String
+  data      Json     @default("{}")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}

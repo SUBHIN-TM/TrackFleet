@@ -1,0 +1,23 @@
+{
+  "name": "trackfleet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TrackFleet — multi-tenant vehicle tracking SaaS (schools-first)",
+  "workspaces": [
+    "backend",
+    "frontend/*",
+    "shared"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace backend",
+    "dev:admin": "npm run dev --workspace @trackfleet/admin",
+    "dev:parent": "npm run dev --workspace @trackfleet/parent",
+    "dev:super": "npm run dev --workspace @trackfleet/super-admin",
+    "db:migrate": "npm run db:migrate --workspace backend",
+    "db:seed": "npm run db:seed --workspace backend",
+    "db:studio": "npm run db:studio --workspace backend"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
