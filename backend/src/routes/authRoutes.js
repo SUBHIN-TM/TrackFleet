@@ -23,7 +23,8 @@ const loginSchema = z
   .object({
     // Admins/guardians sign in by email; drivers by their org login code
     // (DRV-01). Exactly one identifier is supplied by whichever app is calling.
-    email: z.string().email().optional(),
+    // trim() first: a copy-pasted trailing space must not fail the login.
+    email: z.string().trim().email().optional(),
     loginId: z.string().min(1).optional().transform((s) => (s ? s.trim().toUpperCase() : s)),
     password: z.string().min(1),
     // Tenant users (admin/parent/driver) log in via their org's portal, which
@@ -185,7 +186,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { email, tenantSlug } = parseOr400(
       z.object({
-        email: z.string().email(),
+        email: z.string().trim().email(),
         tenantSlug: z.string().optional().transform((s) => (s ? normalizeSlug(s) : s)),
       }),
       req.body

@@ -17,7 +17,7 @@ export default function Login() {
   async function submit(e) {
     e.preventDefault();
     setError(''); setBusy(true);
-    try { await login(email, password); nav('/'); }
+    try { await login(email.trim(), password); nav('/'); }
     catch (err) { setError(err.response?.data?.error || err.message || 'Login failed'); }
     finally { setBusy(false); }
   }

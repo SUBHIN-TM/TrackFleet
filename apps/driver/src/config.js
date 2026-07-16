@@ -13,4 +13,6 @@
 // iOS simulator can use http://localhost:4004.
 // In production, set this to your deployed API domain (https://api.example.com).
 // ============================================================================
-export const API_URL = 'http://172.16.3.95:4004';
+// Production API — the deployed backend. For local dev against your PC,
+// temporarily switch to your LAN IP (e.g. http://192.168.1.23:4004).
+export const API_URL = 'https://trackfleet.360turningpoint.com';
