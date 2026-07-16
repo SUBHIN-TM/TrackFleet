@@ -138,6 +138,7 @@ router.post(
           update: { relation: data.guardian.relation },
         });
         guardianCredentials = {
+          id: guardian.id,
           name: guardian.name,
           loginId: guardian.loginId,
           phone: guardian.phone,
@@ -186,6 +187,33 @@ router.patch(
       include: passengerInclude,
     });
     res.json({ passenger });
+  })
+);
+
+// POST /api/passengers/guardians/:guardianId/reset-password — the admin owns
+// guardian passwords (same model as drivers): pass a chosen `password` or omit
+// to generate one. Stored re-viewable so it can be re-shared on WhatsApp.
+const guardianResetSchema = z.object({ password: z.string().min(6, 'use at least 6 characters').optional() });
+router.post(
+  '/guardians/:guardianId/reset-password',
+  asyncHandler(async (req, res) => {
+    const { password } = parseOr400(guardianResetSchema, req.body ?? {});
+    const guardian = await prisma.user.findFirst({
+      where: { id: req.params.guardianId, tenantId: req.tenantId, role: 'GUARDIAN' },
+    });
+    if (!guardian) throw new ApiError(404, 'Guardian not found');
+
+    const newPassword = password || generateTempPassword();
+    const updated = await prisma.user.update({
+      where: { id: guardian.id },
+      data: {
+        passwordHash: await hashPassword(newPassword),
+        provisionalPassword: newPassword,
+        mustChangePassword: false,
+      },
+      select: { id: true, name: true, phone: true, loginId: true, provisionalPassword: true },
+    });
+    res.json({ guardian: updated });
   })
 );
 

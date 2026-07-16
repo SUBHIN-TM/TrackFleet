@@ -11,11 +11,21 @@ import KeyOutlinedIcon from '@mui/icons-material/KeyOutlined';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 
 const PARENT_PORTAL = (import.meta.env.VITE_PARENT_PORTAL_URL || 'http://localhost:5175').replace(/\/$/, '');
+
+// No 0/O/1/l/I — read off a screen and retyped by hand. Same alphabet as the
+// backend generator, so suggestions look consistent.
+const PW_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+function suggestPassword(len = 12) {
+  const a = new Uint32Array(len);
+  (window.crypto || window.msCrypto).getRandomValues(a);
+  return Array.from(a, (n) => PW_ALPHABET[n % PW_ALPHABET.length]).join('');
+}
 const parentLink = (org, phone) =>
   `${PARENT_PORTAL}/login?org=${encodeURIComponent(org)}&phone=${encodeURIComponent(phone)}`;
 
@@ -37,6 +47,11 @@ export default function Passengers() {
   const [editing, setEditing] = useState(null);
   const [gCreds, setGCreds] = useState(null); // parent sign-in details panel
   const [copiedKey, setCopiedKey] = useState(null);
+  // Reset-password dialog for the guardian in gCreds (prefilled suggestion).
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetPw, setResetPw] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetErr, setResetErr] = useState('');
 
   async function load() {
     const { data } = await api.get('/api/passengers');
@@ -92,7 +107,7 @@ export default function Passengers() {
       // Surface the parent's sign-in details to hand over, if one was created.
       if (data.guardianCredentials?.password) {
         const c = data.guardianCredentials;
-        setGCreds({ name: c.name, orgId: c.orgId || orgId, login: c.loginId, password: c.password,
+        setGCreds({ id: c.id, name: c.name, orgId: c.orgId || orgId, login: c.loginId, password: c.password,
           link: c.portalLink || parentLink(c.orgId || orgId, c.loginId) });
       }
     } catch (err) { setError(err.response?.data?.error || 'Failed'); }
@@ -102,9 +117,26 @@ export default function Passengers() {
 
   function openParentCreds(g) {
     setGCreds({
-      name: g.name, orgId, login: g.loginId || g.phone, password: g.provisionalPassword,
+      id: g.id, name: g.name, orgId, login: g.loginId || g.phone, password: g.provisionalPassword,
       link: parentLink(orgId, g.loginId || g.phone),
     });
+  }
+
+  // Reset the parent's password — prefilled suggestion the admin can keep or edit.
+  function openReset() {
+    setResetPw(suggestPassword()); setResetErr(''); setResetOpen(true);
+  }
+  async function confirmReset() {
+    if (resetPw.trim().length < 6) return setResetErr('Use at least 6 characters');
+    setResetErr(''); setResetBusy(true);
+    try {
+      const { data } = await api.post(`/api/passengers/guardians/${gCreds.id}/reset-password`, { password: resetPw.trim() });
+      setGCreds((c) => c && { ...c, password: data.guardian.provisionalPassword });
+      setResetOpen(false);
+      load();
+    } catch (err) {
+      setResetErr(err.response?.data?.error || 'Failed');
+    } finally { setResetBusy(false); }
   }
 
   function copy(key, value) {
@@ -272,8 +304,44 @@ export default function Passengers() {
             </Typography>
           </Stack>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ px: 3, pb: 2, justifyContent: 'space-between' }}>
+          <Button startIcon={<RestartAltIcon />} color="warning" onClick={openReset} disabled={!gCreds?.id}>
+            Reset password
+          </Button>
           <Button variant="contained" onClick={() => setGCreds(null)} sx={{ borderRadius: 2.5, px: 3 }}>Done</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Reset parent password — prefilled with a suggestion, freely editable. */}
+      <Dialog open={resetOpen} onClose={() => setResetOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Reset password — {gCreds?.name}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} mt={1}>
+            {resetErr && <Alert severity="error">{resetErr}</Alert>}
+            <Typography variant="body2" color="text.secondary">
+              Keep this suggested password, or type your own. The parent signs in with it.
+            </Typography>
+            <TextField autoFocus fullWidth label="New password" value={resetPw}
+              onChange={(e) => setResetPw(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && resetPw.trim().length >= 6) confirmReset(); }}
+              helperText="At least 6 characters."
+              InputProps={{
+                sx: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontWeight: 700 },
+                endAdornment: (
+                  <Tooltip title="Suggest another" arrow>
+                    <IconButton edge="end" onClick={() => setResetPw(suggestPassword())}>
+                      <RestartAltIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                ),
+              }} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResetOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={confirmReset} disabled={resetBusy || resetPw.trim().length < 6}>
+            {resetBusy ? 'Saving…' : 'Set password'}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
