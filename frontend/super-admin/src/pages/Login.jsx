@@ -8,8 +8,9 @@ import { useAuth } from '../lib/auth.jsx';
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
-  const [email, setEmail] = useState('super@trackfleet.local');
-  const [password, setPassword] = useState('admin123');
+  // Prefill dev credentials only in dev builds — production must start blank.
+  const [email, setEmail] = useState(import.meta.env.DEV ? 'super@trackfleet.local' : '');
+  const [password, setPassword] = useState(import.meta.env.DEV ? 'admin123' : '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
