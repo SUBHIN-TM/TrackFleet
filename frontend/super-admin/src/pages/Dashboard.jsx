@@ -20,8 +20,8 @@ const growth = [
 
 function Stat({ icon, label, value, tint, delta }) {
   return (
-    <Card>
-      <CardContent>
+    <Card sx={{ height: '100%' }}>
+      <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
           <Box>
             <Typography variant="h4" fontWeight={800} lineHeight={1}>{value}</Typography>
@@ -29,13 +29,15 @@ function Stat({ icon, label, value, tint, delta }) {
           </Box>
           <Box sx={{ width: 48, height: 48, borderRadius: '50%', display: 'grid', placeItems: 'center', bgcolor: `${tint}18`, color: tint }}>{icon}</Box>
         </Stack>
-        {delta != null && (
-          <Stack direction="row" spacing={0.5} alignItems="center" mt={1.5}>
-            <TrendingUpRoundedIcon sx={{ fontSize: 16, color: 'success.main' }} />
-            <Typography variant="caption" color="success.main" fontWeight={700}>{delta}</Typography>
-            <Typography variant="caption" color="text.secondary">vs last month</Typography>
-          </Stack>
-        )}
+        <Stack direction="row" spacing={0.5} alignItems="center" mt={1.5} sx={{ minHeight: 20 }}>
+          {delta != null && (
+            <>
+              <TrendingUpRoundedIcon sx={{ fontSize: 16, color: 'success.main' }} />
+              <Typography variant="caption" color="success.main" fontWeight={700}>{delta}</Typography>
+              <Typography variant="caption" color="text.secondary">vs last month</Typography>
+            </>
+          )}
+        </Stack>
       </CardContent>
     </Card>
   );
@@ -64,11 +66,11 @@ export default function Dashboard() {
       <PageHeader
         title="Dashboard"
         crumbs={[{ label: 'Dashboard' }]}
-        action={<Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => nav('/tenants')}>Manage Tenants</Button>}
+        action={<Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => nav('/tenants')}>Manage Organizations</Button>}
       />
 
       <Grid container spacing={3}>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<ApartmentRoundedIcon />} label="Total tenants" value={tenants.length} tint={PRIMARY} delta="+2" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<ApartmentRoundedIcon />} label="Total organizations" value={tenants.length} tint={PRIMARY} delta="+2" /></Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<CheckCircleRoundedIcon />} label="Active" value={active} tint="#22c55e" delta="+1" /></Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<BlockRoundedIcon />} label="Suspended" value={suspended} tint="#ef4444" /></Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<GroupsRoundedIcon />} label="Passengers" value={passengers} tint="#06b6d4" delta="+18" /></Grid>
@@ -138,7 +140,7 @@ export default function Dashboard() {
           <Card>
             <CardContent>
               <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
-                <Typography variant="h6">Recent tenants</Typography>
+                <Typography variant="h6">Recent organizations</Typography>
                 <Button size="small" onClick={() => nav('/tenants')}>View all</Button>
               </Stack>
               <Grid container spacing={2}>
@@ -150,7 +152,7 @@ export default function Dashboard() {
                           <Avatar variant="rounded" sx={{ bgcolor: 'primary.light', color: 'primary.main', fontWeight: 800 }}>{t.name[0]}</Avatar>
                           <Box>
                             <Typography fontWeight={700} lineHeight={1.2}>{t.name}</Typography>
-                            <Typography variant="caption" color="text.secondary">/{t.slug}</Typography>
+                            <Typography variant="caption" color="text.secondary">{t.slug?.toUpperCase()}</Typography>
                           </Box>
                         </Stack>
                         <Chip size="small" label={t.status} color={statusChip(t.status)} variant="outlined" />

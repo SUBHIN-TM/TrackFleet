@@ -35,3 +35,6 @@ mobile/**/node_modules/
 mobile/**/.expo/
 mobile/**/android/app/build/
 mobile/**/ios/Pods/
+
+# Production secrets — never commit
+production-setup.txt

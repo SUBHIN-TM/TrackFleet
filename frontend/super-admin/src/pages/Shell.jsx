@@ -7,17 +7,20 @@ import {
 import { useState } from 'react';
 import DashboardRoundedIcon from '@mui/icons-material/GridViewRounded';
 import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded';
+import CategoryRoundedIcon from '@mui/icons-material/CategoryRounded';
 import DirectionsBusRoundedIcon from '@mui/icons-material/DirectionsBusRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import NotificationsNoneRoundedIcon from '@mui/icons-material/NotificationsNoneRounded';
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
 import { useAuth } from '../lib/auth.jsx';
+import NotificationBell from '../components/NotificationBell.jsx';
 
 const WIDTH = 260;
 const nav = [
   { to: '/', label: 'Dashboard', icon: <DashboardRoundedIcon /> },
-  { to: '/tenants', label: 'Tenants', icon: <ApartmentRoundedIcon /> },
+  { to: '/tenants', label: 'Organizations', icon: <ApartmentRoundedIcon /> },
+  { to: '/org-types', label: 'Organization Types', icon: <CategoryRoundedIcon /> },
 ];
 
 export default function Shell() {
@@ -48,9 +51,7 @@ export default function Shell() {
 
           <Box sx={{ flexGrow: 1 }} />
 
-          <Tooltip title="Notifications">
-            <IconButton><Badge color="error" variant="dot"><NotificationsNoneRoundedIcon /></Badge></IconButton>
-          </Tooltip>
+          <NotificationBell />
           <IconButton onClick={(e) => setAnchor(e.currentTarget)} sx={{ ml: 0.5 }}>
             <Avatar sx={{ width: 38, height: 38, bgcolor: 'primary.main', fontSize: 14, fontWeight: 800 }}>{initials}</Avatar>
           </IconButton>

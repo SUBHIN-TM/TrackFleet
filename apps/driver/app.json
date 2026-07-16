@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "TrackFleet Driver",
+    "slug": "trackfleet-driver",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.trackfleet.driver"
+    },
+    "android": {
+      "package": "com.trackfleet.driver",
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "TrackFleet uses your location while a trip is running so the organization and parents can see where the bus is."
+        }
+      ]
+    ]
+  }
+}

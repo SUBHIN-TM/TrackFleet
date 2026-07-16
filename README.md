@@ -38,7 +38,7 @@ npm install
 npm run db:migrate
 
 # 5. Run the API
-npm run dev:api        # http://localhost:4000/health
+npm run dev:api        # http://localhost:4004/health
 ```
 
 ## Status

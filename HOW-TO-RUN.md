@@ -8,7 +8,7 @@ A step-by-step guide to start the project on your machine.
 
 | App | Command | URL | What it is |
 |-----|---------|-----|------------|
-| **Backend API** | `npm run dev:api` | http://localhost:4000 | The engine (no screen). Every app talks to this. |
+| **Backend API** | `npm run dev:api` | http://localhost:4004 | The engine (no screen). Every app talks to this. |
 | **Super Admin** | `npm run dev:super` | http://localhost:5173 | Your platform console — create/manage schools (green UI). |
 | **Admin** | `npm run dev:admin` | http://localhost:5174 | School admin portal — buses, drivers, students, routes (blue UI). |
 | **Database viewer** | `npm run db:studio` | http://localhost:5555 | Visual browser for the database tables (optional). |
@@ -64,8 +64,8 @@ You need **one terminal per app** (each command keeps running).
 cd D:\TrioDev\TrackFleet
 npm run dev:api
 ```
-Wait for: `TrackFleet API listening on http://localhost:4000`
-Check it: open http://localhost:4000 → you should see a "Backend running successfully" screen.
+Wait for: `TrackFleet API listening on http://localhost:4004`
+Check it: open http://localhost:4004 → you should see a "Backend running successfully" screen.
 
 **Terminal 2 — Super Admin console:**
 ```bash

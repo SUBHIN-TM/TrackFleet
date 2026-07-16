@@ -24,11 +24,6 @@ datasource db {
 // ENUMS
 // ----------------------------------------------------------------------------
 
-enum Vertical {
-  SCHOOL
-  HOSPITAL
-  COMPANY
-}
 
 enum TenantStatus {
   ACTIVE
@@ -99,11 +94,20 @@ enum VerificationMethod {
 
 model Tenant {
   id        String       @id @default(cuid())
+  // Human-friendly auto-incrementing number shown in the UI (e.g. Org #1001).
+  code      Int          @unique @default(autoincrement())
   name      String
-  slug      String       @unique // subdomain e.g. "greenvalley"
-  vertical  Vertical     @default(SCHOOL)
+  // Auto-generated login id, stored lowercase, shown uppercase: "tf-greenvalley"
+  // renders as TF-GREENVALLEY. Frozen at creation — renaming the org keeps it.
+  slug      String       @unique
   logoUrl   String?
   status    TenantStatus @default(TRIAL)
+
+  // Organization type (School/Hospital/…). Super-admin-managed data, not an
+  // enum, so new types ship without a migration. Restrict: a type in use by
+  // any org cannot be deleted.
+  orgTypeId String
+  orgType   OrgType      @relation(fields: [orgTypeId], references: [id], onDelete: Restrict)
 
   // Feature flags stored as JSON so you can flip what a tenant "bought"
   // without a migration. e.g. { "parentApp": true, "sos": false, "eta": true }
@@ -120,6 +124,28 @@ model Tenant {
   trips       Trip[]
 
   @@index([status])
+  @@index([orgTypeId])
+}
+
+// The vertical an org belongs to (School, Hospital, …). Deliberately just a
+// label: display wording like "Students" vs "Employees" is NOT stored here,
+// because two schools may want different words. If per-org wording is needed
+// later it belongs on Tenant, where it can vary per organization.
+model OrgType {
+  id             String   @id @default(cuid())
+  // Stable code for seeds/imports. The display `name` can be renamed freely
+  // without breaking anything that keys off the type.
+  key            String   @unique
+  name           String   @unique
+
+  // Retires a type: hidden from the new-org picker, but orgs already on it
+  // keep working. Preferred over deleting.
+  active         Boolean  @default(true)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenants        Tenant[]
 }
 
 // ----------------------------------------------------------------------------
@@ -133,16 +159,37 @@ model User {
   tenant       Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   role         Role
-  email        String
+  // Optional because drivers sign in with a loginId + org, not email. Admins
+  // and guardians still authenticate by email. At least one of email/loginId
+  // identifies every user within their tenant.
+  email        String?
+  // Per-org login handle for users without email — drivers get an auto code
+  // like "DRV-01". Null for email-based users. Unique within a tenant.
+  loginId      String?
   passwordHash String
-  name         String
+  // Driver provisioning only: the plaintext temp password the admin handed out,
+  // kept re-viewable so they can re-share sign-in details (drivers lose slips).
+  // Cleared the instant the driver sets their own password — a chosen password
+  // is NEVER stored here. Null for admins/guardians, who self-manage via OTP.
+  provisionalPassword String?
+  // Optional: the super admin only supplies an email when inviting an org
+  // admin, so the name stays blank until that person sets it themselves.
+  name         String?
   phone        String?
   status       UserStatus @default(ACTIVE)
+
+  // Null until the person proves they own the mailbox via an emailed OTP.
+  // Login stops at the OTP step while this is null.
+  emailVerifiedAt    DateTime?
+  // Set on invited admins: the emailed temp password works exactly once, then
+  // they must choose their own before a session token is issued.
+  mustChangePassword Boolean  @default(false)
 
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   // Role-specific extras
+  otps           EmailOtp[]
   driverProfile  DriverProfile?
   guardianLinks  GuardianPassenger[]
   drivenTrips    Trip[]          @relation("TripDriver")
@@ -150,8 +197,39 @@ model User {
 
   // Email is unique per tenant (two tenants may share the same person's email
   // conceptually, but for MVP we keep it simple: unique within a tenant scope).
+  // Postgres treats NULLs as distinct, so many drivers can share a null email.
   @@unique([tenantId, email])
+  // Same idea for the driver login handle: unique per org, many nulls allowed.
+  @@unique([tenantId, loginId])
   @@index([tenantId, role])
+}
+
+enum OtpPurpose {
+  // First-login mailbox check.
+  VERIFY_EMAIL
+  // "Forgot password" — the admin never retypes their email, it comes from
+  // the login form they were already on.
+  RESET_PASSWORD
+}
+
+// Emailed one-time codes. Stored hashed (same reasoning as passwords: a db
+// leak must not hand over live codes) and single-use via `consumedAt`.
+model EmailOtp {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  purpose   OtpPurpose
+  codeHash  String
+  expiresAt DateTime
+  // Set the moment a code is spent, so a replay can't reuse it.
+  consumedAt DateTime?
+  // Guessing budget. Burned codes are dead even before they expire.
+  attempts  Int        @default(0)
+
+  createdAt DateTime   @default(now())
+
+  @@index([userId, purpose])
 }
 
 model DriverProfile {
@@ -173,7 +251,11 @@ model Vehicle {
   tenantId     String
   tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  regNumber    String // license plate e.g. "KL-01-AB-1234"
+  regNumber    String // license plate e.g. "KL-01-AB-1234" — the legal identity
+  // Short human-friendly label the org paints on the bus and everyone actually
+  // says out loud ("Bus 07", "KV-12"). Optional; the reg plate stays the unique
+  // legal identity. Unique per tenant when set (Postgres lets NULLs coexist).
+  fleetNo      String?
   capacity     Int      @default(40)
   photoUrl     String?
   insuranceExp DateTime?
@@ -186,6 +268,7 @@ model Vehicle {
   trips        Trip[]
 
   @@unique([tenantId, regNumber])
+  @@unique([tenantId, fleetNo])
   @@index([tenantId])
 }
 
@@ -199,8 +282,20 @@ model Passenger {
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   name        String
-  grade       String? // "Class 5B" — generic label, means dept/ward in other verticals
+  // Neutral sub-grouping label that suits every vertical: a school types
+  // "Class 5B", a hospital "Cardiology / Ward 3", an office "Sales". One free
+  // field on purpose — org-specific words (class/section/ward) never leak in.
+  category    String?
+  // Direct line to the passenger themselves (older student, employee, patient).
+  // Optional — younger passengers may only have a guardian number.
+  phone       String?
   photoUrl    String?
+
+  // A passenger rides exactly ONE route (or none). This is route membership;
+  // StopAssignment below is the finer "which stop they board at" within it.
+  // Reassigning to another route just moves this single value.
+  routeId     String?
+  route       Route?   @relation(fields: [routeId], references: [id], onDelete: SetNull)
 
   // Home location (geocoded from address at import) for "nearest stop" suggestion.
   homeAddress String?
@@ -221,6 +316,7 @@ model Passenger {
   absences        Absence[]
 
   @@index([tenantId, active])
+  @@index([routeId])
 }
 
 // Many-to-many: one guardian can have several children (siblings); a child can
@@ -253,8 +349,9 @@ model Route {
   createdAt  DateTime       @default(now())
   updatedAt  DateTime       @updatedAt
 
-  stops     Stop[]
-  schedules TripSchedule[]
+  stops      Stop[]
+  schedules  TripSchedule[]
+  passengers Passenger[]
 
   @@index([tenantId, active])
 }
@@ -296,6 +393,10 @@ model TripSchedule {
   id         String         @id @default(cuid())
   tenantId   String
   tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Human label the admin recognizes it by ("Schedule 3", "Morning pickup A").
+  // Prefilled with an incrementing number in the UI; freely renameable.
+  name       String
 
   routeId    String
   route      Route          @relation(fields: [routeId], references: [id])

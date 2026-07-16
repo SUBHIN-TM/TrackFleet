@@ -12,7 +12,7 @@ import PageHeader from '../components/PageHeader.jsx';
 export default function Vehicles() {
   const [rows, setRows] = useState([]);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ regNumber: '', capacity: 40 });
+  const [form, setForm] = useState({ regNumber: '', fleetNo: '', capacity: 40 });
   const [error, setError] = useState('');
 
   async function load() {
@@ -24,9 +24,9 @@ export default function Vehicles() {
   async function create() {
     setError('');
     try {
-      await api.post('/api/vehicles', { regNumber: form.regNumber, capacity: Number(form.capacity) });
+      await api.post('/api/vehicles', { regNumber: form.regNumber, fleetNo: form.fleetNo, capacity: Number(form.capacity) });
       setOpen(false);
-      setForm({ regNumber: '', capacity: 40 });
+      setForm({ regNumber: '', fleetNo: '', capacity: 40 });
       load();
     } catch (err) { setError(err.response?.data?.error || 'Failed'); }
   }
@@ -44,6 +44,7 @@ export default function Vehicles() {
         <Table>
           <TableHead>
             <TableRow>
+              <TableCell>Bus No.</TableCell>
               <TableCell>Registration</TableCell>
               <TableCell align="center">Capacity</TableCell>
               <TableCell>Status</TableCell>
@@ -53,6 +54,7 @@ export default function Vehicles() {
           <TableBody>
             {rows.map((v) => (
               <TableRow key={v.id} hover>
+                <TableCell>{v.fleetNo ? <Chip size="small" label={v.fleetNo} sx={{ fontWeight: 700 }} /> : <span style={{ color: '#aaa' }}>—</span>}</TableCell>
                 <TableCell><b>{v.regNumber}</b></TableCell>
                 <TableCell align="center">{v.capacity}</TableCell>
                 <TableCell><Chip size="small" label={v.active ? 'Active' : 'Inactive'} color={v.active ? 'success' : 'default'} /></TableCell>
@@ -61,7 +63,7 @@ export default function Vehicles() {
                 </TableCell>
               </TableRow>
             ))}
-            {rows.length === 0 && <TableRow><TableCell colSpan={4} align="center" sx={{ py: 5, color: 'text.secondary' }}>No vehicles yet.</TableCell></TableRow>}
+            {rows.length === 0 && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 5, color: 'text.secondary' }}>No vehicles yet.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </Card>
@@ -71,7 +73,10 @@ export default function Vehicles() {
         <DialogContent>
           <Stack spacing={2} mt={1}>
             {error && <Alert severity="error">{error}</Alert>}
-            <TextField label="Registration number" value={form.regNumber} onChange={(e) => setForm({ ...form, regNumber: e.target.value })} placeholder="KL-01-AB-1234" />
+            <TextField label="Registration number" value={form.regNumber} onChange={(e) => setForm({ ...form, regNumber: e.target.value })} placeholder="KL-01-AB-1234"
+              helperText="The number plate — the vehicle’s legal identity" />
+            <TextField label="Bus number (optional)" value={form.fleetNo} onChange={(e) => setForm({ ...form, fleetNo: e.target.value })} placeholder="Bus 07"
+              helperText="Short name everyone says — shown to drivers & parents" />
             <TextField label="Capacity" type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
           </Stack>
         </DialogContent>

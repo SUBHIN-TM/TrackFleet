@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4004',
 });
 
 // Attach the JWT to every request if we have one.
@@ -18,7 +18,8 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       localStorage.removeItem('tf_token');
       localStorage.removeItem('tf_user');
-      if (!location.pathname.startsWith('/login')) location.href = '/login';
+      // BASE_URL is '/' in dev and '/super-admin/' under the production subpath.
+      if (!location.pathname.includes('/login')) location.href = `${import.meta.env.BASE_URL}login`;
     }
     return Promise.reject(err);
   }

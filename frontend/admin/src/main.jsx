@@ -11,18 +11,23 @@ import Vehicles from './pages/Vehicles.jsx';
 import Drivers from './pages/Drivers.jsx';
 import Passengers from './pages/Passengers.jsx';
 import RoutesPage from './pages/RoutesPage.jsx';
+import Schedules from './pages/Schedules.jsx';
+import LiveToday from './pages/LiveToday.jsx';
 
 function Protected({ children }) {
   const { user } = useAuth();
   return user ? children : <Navigate to="/login" replace />;
 }
 
+// '/' in dev; '/admin' when built for the production subpath.
+const BASENAME = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        <BrowserRouter>
+        <BrowserRouter basename={BASENAME}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<Protected><Shell /></Protected>}>
@@ -31,6 +36,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
               <Route path="drivers" element={<Drivers />} />
               <Route path="passengers" element={<Passengers />} />
               <Route path="routes" element={<RoutesPage />} />
+              <Route path="schedules" element={<Schedules />} />
+              <Route path="live" element={<LiveToday />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

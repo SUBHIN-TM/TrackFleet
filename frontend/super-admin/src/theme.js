@@ -76,6 +76,24 @@ const theme = createTheme({
     MuiTextField: { defaultProps: { size: 'small' } },
     MuiOutlinedInput: { styleOverrides: { root: { borderRadius: 12 } } },
     MuiAppBar: { styleOverrides: { root: { boxShadow: 'none' } } },
+    // Tooltips here explain what an action will actually do, so they carry a
+    // sentence or two — the 11px default is unreadable at that length.
+    MuiTooltip: {
+      defaultProps: { arrow: true, enterDelay: 250, placement: 'top' },
+      styleOverrides: {
+        tooltip: {
+          fontSize: 12.5,
+          lineHeight: 1.6,
+          fontWeight: 400,
+          padding: '10px 12px',
+          borderRadius: 10,
+          maxWidth: 320,
+          backgroundColor: '#2e294e',
+          boxShadow: '0 8px 28px rgba(46,41,78,0.28)',
+        },
+        arrow: { color: '#2e294e' },
+      },
+    },
   },
 });
 

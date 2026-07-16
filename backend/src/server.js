@@ -7,10 +7,17 @@ import { prisma } from './lib/prisma.js';
 import { errorHandler } from './lib/http.js';
 import authRoutes from './routes/authRoutes.js';
 import tenantRoutes from './routes/tenantRoutes.js';
+import orgTypeRoutes from './routes/orgTypeRoutes.js';
 import vehicleRoutes from './routes/vehicleRoutes.js';
 import driverRoutes from './routes/driverRoutes.js';
 import passengerRoutes from './routes/passengerRoutes.js';
+import guardianRoutes from './routes/guardianRoutes.js';
 import routeRoutes from './routes/routeRoutes.js';
+import scheduleRoutes from './routes/scheduleRoutes.js';
+import tripRoutes from './routes/tripRoutes.js';
+import mapRoutes from './routes/mapRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import { verifyMailer } from './lib/mailer.js';
 
 const app = express();
 app.use(express.json());
@@ -63,7 +70,7 @@ app.get('/', async (_req, res) => {
     <h1>TrackFleet Backend</h1>
     <div class="ok"><span class="dot"></span>${dbUp ? 'Running successfully' : 'Running — database unreachable'}</div>
     <table>
-      <tr><td>API server</td><td>online :${process.env.PORT || 4000}</td></tr>
+      <tr><td>API server</td><td>online :${process.env.PORT || 4004}</td></tr>
       <tr><td>Database</td><td>${dbUp ? 'connected' : 'DOWN'}</td></tr>
       <tr><td>Realtime (Socket.IO)</td><td>ready</td></tr>
       <tr><td>Environment</td><td>${process.env.NODE_ENV || 'development'}</td></tr>
@@ -88,11 +95,16 @@ app.get('/health', async (_req, res) => {
 // --- Routes ---
 app.use('/api/auth', authRoutes);
 app.use('/api/tenants', tenantRoutes);
+app.use('/api/org-types', orgTypeRoutes);
 app.use('/api/vehicles', vehicleRoutes);
 app.use('/api/drivers', driverRoutes);
 app.use('/api/passengers', passengerRoutes);
+app.use('/api/guardian', guardianRoutes);
 app.use('/api/routes', routeRoutes);
-// (more added as we build: /api/schedules, /api/trips ...)
+app.use('/api/schedules', scheduleRoutes);
+app.use('/api/trips', tripRoutes);
+app.use('/api/map', mapRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Central error handler — must be after routes.
 app.use(errorHandler);
@@ -105,15 +117,22 @@ const io = new SocketServer(server, {
 });
 
 io.on('connection', (socket) => {
-  // Clients join a room per vehicle/trip so parents only get their bus.
+  // Clients join a room per trip so parents only get their bus, and admins a
+  // room per tenant for the whole-fleet live board.
   socket.on('subscribe:trip', (tripId) => socket.join(`trip:${tripId}`));
   socket.on('unsubscribe:trip', (tripId) => socket.leave(`trip:${tripId}`));
+  socket.on('subscribe:tenant', (tenantId) => socket.join(`tenant:${tenantId}`));
+  socket.on('unsubscribe:tenant', (tenantId) => socket.leave(`tenant:${tenantId}`));
 });
 
 // Expose io to route handlers via app.locals
 app.locals.io = io;
 
-const PORT = process.env.PORT || 4000;
-server.listen(PORT, () => {
+const PORT = process.env.PORT || 4004;
+server.listen(PORT, async () => {
   console.log(`TrackFleet API listening on http://localhost:${PORT}`);
+  // Invites and OTPs are useless if SMTP is misconfigured, and a bad key would
+  // otherwise only surface when a real admin tries to sign in.
+  const mail = await verifyMailer();
+  console.log(mail.ok ? '  mail: SMTP ready' : `  mail: ${mail.reason}`);
 });

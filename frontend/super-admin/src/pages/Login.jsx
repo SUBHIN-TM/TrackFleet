@@ -34,7 +34,7 @@ export default function Login() {
         <Box>
           <Typography variant="h3" fontWeight={800} sx={{ letterSpacing: '-0.03em', mb: 2 }}>Platform Console</Typography>
           <Typography sx={{ opacity: 0.9, maxWidth: 420 }}>
-            Provision organizations, control feature access, and manage every school on your fleet-tracking platform — from one place.
+            Provision organizations, control feature access, and manage every one on your fleet-tracking platform — from one place.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center" sx={{ opacity: 0.85 }}>

@@ -9,6 +9,9 @@ router.use(authenticate, authorize('TENANT_ADMIN'), requireTenant);
 
 const upsertSchema = z.object({
   regNumber: z.string().min(2),
+  // Optional friendly label ("Bus 07"). Empty string is treated as "not set" so
+  // it doesn't trip the per-tenant unique index (which only constrains non-nulls).
+  fleetNo: z.string().trim().optional().or(z.literal('')),
   capacity: z.coerce.number().int().positive().default(40),
   photoUrl: z.string().url().optional().or(z.literal('')),
   active: z.boolean().optional(),

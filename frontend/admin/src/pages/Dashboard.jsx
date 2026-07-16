@@ -44,14 +44,14 @@ export default function Dashboard() {
   const bars = [
     { name: 'Vehicles', value: c.vehicles, color: '#2f6df6' },
     { name: 'Drivers', value: c.drivers, color: '#06b6d4' },
-    { name: 'Students', value: c.passengers, color: '#8b5cf6' },
+    { name: 'Passengers', value: c.passengers, color: '#8b5cf6' },
     { name: 'Routes', value: c.routes, color: '#f59e0b' },
   ];
 
   const setup = [
     { label: 'Add a vehicle', to: '/vehicles', icon: <DirectionsBusRoundedIcon />, done: c.vehicles > 0 },
     { label: 'Add a driver', to: '/drivers', icon: <BadgeRoundedIcon />, done: c.drivers > 0 },
-    { label: 'Add students', to: '/passengers', icon: <GroupsRoundedIcon />, done: c.passengers > 0 },
+    { label: 'Add passengers', to: '/passengers', icon: <GroupsRoundedIcon />, done: c.passengers > 0 },
     { label: 'Build a route', to: '/routes', icon: <RouteRoundedIcon />, done: c.routes > 0 },
   ];
 
@@ -63,7 +63,7 @@ export default function Dashboard() {
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<DirectionsBusRoundedIcon />} label="Vehicles" value={c.vehicles} tint="#2f6df6" onClick={() => nav('/vehicles')} /></Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<BadgeRoundedIcon />} label="Drivers" value={c.drivers} tint="#06b6d4" onClick={() => nav('/drivers')} /></Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<GroupsRoundedIcon />} label="Students" value={c.passengers} tint="#8b5cf6" onClick={() => nav('/passengers')} /></Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<GroupsRoundedIcon />} label="Passengers" value={c.passengers} tint="#8b5cf6" onClick={() => nav('/passengers')} /></Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><Stat icon={<RouteRoundedIcon />} label="Routes" value={c.routes} tint="#f59e0b" onClick={() => nav('/routes')} /></Grid>
 
         <Grid size={{ xs: 12, md: 7 }}>
