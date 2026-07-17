@@ -16,6 +16,12 @@ const PARENT_PORTAL = (process.env.PARENT_PORTAL_URL || 'http://localhost:5175')
 // Phone doubles as the guardian's login handle, so strip formatting for a stable
 // match (the display copy keeps whatever the admin typed).
 const normalizePhone = (p) => (p || '').replace(/[\s\-()]/g, '');
+// A parent's phone must actually be a phone: it becomes their login, so free
+// text would let a login collide with codes like DRV-01 or hold junk data.
+const phoneSchema = z
+  .string()
+  .trim()
+  .regex(/^\+?[\d\s\-()]{5,20}$/, 'enter a valid phone number');
 const parentPortalLink = (orgSlug, phone) =>
   `${PARENT_PORTAL}/login?${new URLSearchParams({ org: (orgSlug || '').toUpperCase(), phone }).toString()}`;
 
@@ -58,7 +64,7 @@ const createSchema = z.object({
   guardian: z
     .object({
       name: z.string().min(2),
-      phone: z.string().min(5, 'enter a phone number'),
+      phone: phoneSchema,
       relation: z.string().optional(),
     })
     .optional(),
@@ -241,8 +247,8 @@ router.patch(
 // The phone IS their login handle, so changing it changes how they sign in:
 // keep `phone` and `loginId` in lockstep and reject a number already in use.
 const guardianUpdateSchema = z.object({
-  name: z.string().min(2, 'name is too short').optional(),
-  phone: z.string().min(5, 'enter a phone number').optional(),
+  name: z.string().trim().min(2, 'name is too short').optional(),
+  phone: phoneSchema.optional(),
 });
 router.patch(
   '/guardians/:guardianId',
