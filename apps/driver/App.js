@@ -49,6 +49,7 @@ function Login({ onDone, setPhase }) {
   const [org, setOrg] = useState('');
   const [driverId, setDriverId] = useState('');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -82,7 +83,13 @@ function Login({ onDone, setPhase }) {
           {!!error && <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View>}
           <Field label="Organization ID" value={org} onChangeText={setOrg} placeholder="TF-INTERVAL" autoCapitalize="characters" />
           <Field label="Driver ID" value={driverId} onChangeText={setDriverId} placeholder="DRV-01" autoCapitalize="characters" />
-          <Field label="Password" value={password} onChangeText={setPassword} placeholder="Your password" secureTextEntry />
+          <Field label="Password" value={password} onChangeText={setPassword} placeholder="Your password"
+            secureTextEntry={!showPw}
+            right={
+              <TouchableOpacity onPress={() => setShowPw((s) => !s)} style={styles.eyeBtn}>
+                <Text style={styles.eyeText}>{showPw ? '🙈' : '👁️'}</Text>
+              </TouchableOpacity>
+            } />
           <TouchableOpacity style={[styles.primaryBtn, (!ready || busy) && styles.btnDisabled]} onPress={submit} disabled={!ready || busy}>
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Sign in</Text>}
           </TouchableOpacity>
@@ -373,11 +380,15 @@ function Count({ n, label, color }) {
   );
 }
 
-function Field({ label, ...props }) {
+function Field({ label, right, ...props }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput style={styles.input} placeholderTextColor="#9aa0b4" autoCorrect={false} {...props} />
+      <View style={styles.inputRow}>
+        <TextInput style={[styles.input, { flex: 1, backgroundColor: 'transparent' }]}
+          placeholderTextColor="#9aa0b4" autoCorrect={false} {...props} />
+        {right}
+      </View>
     </View>
   );
 }
@@ -393,7 +404,10 @@ const styles = StyleSheet.create({
   brandSub: { color: '#94a3b8', fontSize: 15, marginTop: 2 },
   field: { marginBottom: 16 },
   fieldLabel: { color: '#cbd5e1', fontSize: 13, fontWeight: '600', marginBottom: 6 },
+  inputRow: { backgroundColor: '#1e293b', borderRadius: 12, flexDirection: 'row', alignItems: 'center' },
   input: { backgroundColor: '#1e293b', color: '#fff', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16 },
+  eyeBtn: { paddingHorizontal: 14, paddingVertical: 12 },
+  eyeText: { fontSize: 18 },
   primaryBtn: { backgroundColor: '#2563eb', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
   btnStart: { backgroundColor: '#16a34a' },
   btnGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#334155' },

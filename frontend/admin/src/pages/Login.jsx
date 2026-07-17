@@ -1,11 +1,35 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Box, Button, TextField, Typography, Alert, Stack, Link, CircularProgress } from '@mui/material';
+import {
+  Box, Button, TextField, Typography, Alert, Stack, Link, CircularProgress,
+  IconButton, InputAdornment,
+} from '@mui/material';
 import DirectionsBusRoundedIcon from '@mui/icons-material/DirectionsBusRounded';
 import SchoolRoundedIcon from '@mui/icons-material/SchoolRounded';
 import MarkEmailReadRoundedIcon from '@mui/icons-material/MarkEmailReadRounded';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
+
+// Password input with a show/hide eye — people mistype invited temp passwords.
+function PasswordField(props) {
+  const [show, setShow] = useState(false);
+  return (
+    <TextField {...props} type={show ? 'text' : 'password'}
+      InputProps={{
+        ...props.InputProps,
+        endAdornment: (
+          <InputAdornment position="end">
+            <IconButton onClick={() => setShow((s) => !s)} edge="end" tabIndex={-1}
+              aria-label={show ? 'Hide password' : 'Show password'}>
+              {show ? <VisibilityOff /> : <Visibility />}
+            </IconButton>
+          </InputAdornment>
+        ),
+      }} />
+  );
+}
 
 // Steps:
 //   CREDENTIALS  org id + email + password (from the welcome email)
@@ -152,10 +176,10 @@ export default function Login() {
 
   const newPasswordFields = (
     <>
-      <TextField label="New password" type="password" value={newPassword}
+      <PasswordField label="New password" value={newPassword}
         onChange={(e) => setNewPassword(e.target.value)} fullWidth size="medium"
         helperText="At least 8 characters" />
-      <TextField label="Confirm new password" type="password" value={confirmPassword}
+      <PasswordField label="Confirm new password" value={confirmPassword}
         onChange={(e) => setConfirmPassword(e.target.value)} fullWidth size="medium"
         error={!!confirmPassword && newPassword !== confirmPassword}
         helperText={confirmPassword && newPassword !== confirmPassword ? 'Passwords don’t match' : ' '} />
@@ -205,7 +229,7 @@ export default function Login() {
                   placeholder="TF-GREENVALLEY" helperText="The ID on your welcome email, e.g. TF-GREENVALLEY"
                   inputProps={{ style: { textTransform: 'uppercase' }, autoCapitalize: 'characters', spellCheck: false }} />
                 <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} fullWidth size="medium" />
-                <TextField label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} fullWidth size="medium"
+                <PasswordField label="Password" value={password} onChange={(e) => setPassword(e.target.value)} fullWidth size="medium"
                   autoFocus={prefilled}
                   helperText={prefilled ? 'The temporary password from your invitation email' : ' '} />
                 <Button type="submit" variant="contained" size="large" disabled={busy} sx={{ py: 1.2 }}>

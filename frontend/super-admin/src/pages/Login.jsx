@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Button, TextField, Typography, Alert, Stack } from '@mui/material';
+import { Box, Button, TextField, Typography, Alert, Stack, IconButton, InputAdornment } from '@mui/material';
 import DirectionsBusRoundedIcon from '@mui/icons-material/DirectionsBusRounded';
 import ShieldRoundedIcon from '@mui/icons-material/ShieldRounded';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useAuth } from '../lib/auth.jsx';
 
 export default function Login() {
@@ -13,6 +15,7 @@ export default function Login() {
   const [password, setPassword] = useState(import.meta.env.DEV ? 'admin123' : '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPw, setShowPw] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
@@ -53,7 +56,18 @@ export default function Login() {
             <Stack spacing={2}>
               {error && <Alert severity="error">{error}</Alert>}
               <TextField label="Email" value={email} onChange={(e) => setEmail(e.target.value)} fullWidth size="medium" />
-              <TextField label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} fullWidth size="medium" />
+              <TextField label="Password" type={showPw ? 'text' : 'password'} value={password}
+                onChange={(e) => setPassword(e.target.value)} fullWidth size="medium"
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowPw((s) => !s)} edge="end" tabIndex={-1}
+                        aria-label={showPw ? 'Hide password' : 'Show password'}>
+                        {showPw ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }} />
               <Button type="submit" variant="contained" size="large" disabled={busy} sx={{ py: 1.2 }}>
                 {busy ? 'Signing in…' : 'Sign in'}
               </Button>

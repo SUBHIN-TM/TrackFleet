@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Box, Button, TextField, Typography, Alert, Stack } from '@mui/material';
+import { Box, Button, TextField, Typography, Alert, Stack, IconButton, InputAdornment } from '@mui/material';
 import DirectionsBusRoundedIcon from '@mui/icons-material/DirectionsBusRounded';
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useAuth } from '../lib/auth.jsx';
 
 export default function Login() {
@@ -15,6 +17,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPw, setShowPw] = useState(false);
   const prefilled = Boolean(params.get('org') && params.get('phone'));
 
   async function submit(e) {
@@ -66,8 +69,19 @@ export default function Login() {
                 placeholder="TF-INTERVAL" fullWidth size="medium" />
               <TextField label="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)}
                 placeholder="Your registered phone" fullWidth size="medium" />
-              <TextField label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                autoFocus={prefilled} fullWidth size="medium" />
+              <TextField label="Password" type={showPw ? 'text' : 'password'} value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoFocus={prefilled} fullWidth size="medium"
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowPw((s) => !s)} edge="end" tabIndex={-1}
+                        aria-label={showPw ? 'Hide password' : 'Show password'}>
+                        {showPw ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }} />
               <Button type="submit" variant="contained" size="large" disabled={busy || !ready} sx={{ py: 1.2 }}>
                 {busy ? 'Signing in…' : 'Sign in'}
               </Button>
