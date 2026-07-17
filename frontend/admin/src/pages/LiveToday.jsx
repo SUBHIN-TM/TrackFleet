@@ -8,6 +8,7 @@ import Grid from '@mui/material/Grid2';
 import DirectionsBusRoundedIcon from '@mui/icons-material/DirectionsBusRounded';
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import MyLocationRoundedIcon from '@mui/icons-material/MyLocationRounded';
+import StopCircleRoundedIcon from '@mui/icons-material/StopCircleRounded';
 import { api } from '../lib/api.js';
 import PageHeader from '../components/PageHeader.jsx';
 import PlatformMap from '../components/PlatformMap.jsx';
@@ -39,6 +40,8 @@ export default function LiveToday() {
   const [tileUrl, setTileUrl] = useState('');
   const [styleUrl, setStyleUrl] = useState('');
   const [follow, setFollow] = useState(true);
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  const [ending, setEnding] = useState(false);
   const timer = useRef(null);
 
   async function loadRuns() {
@@ -73,6 +76,19 @@ export default function LiveToday() {
 
   const liveCount = runs?.filter((r) => r.trip && ['STARTED', 'IN_PROGRESS'].includes(r.trip.status)).length || 0;
   const lastLoc = live?.lastLocation;
+  const viewIsLive = live && ['STARTED', 'IN_PROGRESS'].includes(live.trip.status);
+  const stillOnboard = live?.passengers?.filter((p) => p.status === 'ONBOARD') || [];
+
+  // Force-end a run the driver left open (phone died, forgot to end, etc.).
+  async function endTrip() {
+    setEnding(true);
+    try {
+      await api.post(`/api/trips/${viewTripId}/end`, { reason: 'ended from the admin console' });
+      setConfirmEnd(false);
+      await Promise.all([loadRuns(), loadLive(viewTripId)]);
+    } catch { /* surfaced by the refreshed state */ }
+    finally { setEnding(false); }
+  }
 
   return (
     <Box>
@@ -238,8 +254,43 @@ export default function LiveToday() {
             </Stack>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions sx={{ px: 3, pb: 2, justifyContent: 'space-between' }}>
+          {viewIsLive ? (
+            <Tooltip title="Force-end this run — use when the driver forgot, or their phone died" arrow>
+              <Button color="error" startIcon={<StopCircleRoundedIcon />} onClick={() => setConfirmEnd(true)}>
+                End trip
+              </Button>
+            </Tooltip>
+          ) : <span />}
           <Button variant="contained" onClick={() => setViewTripId(null)} sx={{ px: 3 }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirm force-end — spell out the consequences before we do it. */}
+      <Dialog open={confirmEnd} onClose={() => setConfirmEnd(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>End this trip?</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} mt={0.5}>
+            <Typography variant="body2">
+              <b>{live?.trip?.scheduleName}</b> — {live?.route?.name}, driven by {live?.trip?.driver?.name}.
+            </Typography>
+            {stillOnboard.length > 0 && (
+              <Alert severity="warning">
+                {stillOnboard.length} passenger{stillOnboard.length > 1 ? 's are' : ' is'} still marked <b>onboard</b>:
+                {' '}{stillOnboard.map((p) => p.name).join(', ')}. Ending now records that.
+              </Alert>
+            )}
+            <Typography variant="caption" color="text.secondary">
+              Live tracking stops for parents, and the run is marked completed. This is recorded in the trip's
+              audit trail as ended by you. It can’t be reopened — the driver would need to start a new run.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmEnd(false)}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={endTrip} disabled={ending}>
+            {ending ? 'Ending…' : 'End trip'}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

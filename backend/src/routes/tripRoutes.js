@@ -371,13 +371,17 @@ router.post(
   })
 );
 
-// POST /api/trips/:id/end — finish the run.
+// POST /api/trips/:id/end — finish the run. The driver ends their own trip; an
+// org admin can also force-end any of their org's runs (driver forgot, phone
+// died, run left open overnight). Who ended it goes in the audit trail.
 router.post(
   '/:id/end',
-  authorize('DRIVER'),
+  authorize('DRIVER', 'TENANT_ADMIN'),
   asyncHandler(async (req, res) => {
-    const trip = await ownTripOr404(req, { driverOnly: true });
+    const byAdmin = req.user.role === 'TENANT_ADMIN';
+    const trip = await ownTripOr404(req, { driverOnly: !byAdmin });
     if (!ACTIVE.includes(trip.status)) throw new ApiError(409, 'Trip is not running');
+    const { reason } = parseOr400(z.object({ reason: z.string().max(200).optional() }), req.body ?? {});
 
     const stillOnboard = trip.passengers.filter((p) => p.status === 'ONBOARD');
     const trip2 = await prisma.trip.update({
@@ -388,7 +392,11 @@ router.post(
       data: {
         tripId: trip.id, type: 'TRIP_END',
         // Sweep note: ending with someone still marked onboard is worth flagging.
-        reason: stillOnboard.length ? `${stillOnboard.length} passenger(s) still marked onboard` : null,
+        reason: [
+          `ended by ${byAdmin ? `admin ${req.user.name || req.user.email}` : 'driver'}`,
+          reason,
+          stillOnboard.length ? `${stillOnboard.length} passenger(s) still marked onboard` : null,
+        ].filter(Boolean).join(' · '),
       },
     });
     if (stillOnboard.length) {
