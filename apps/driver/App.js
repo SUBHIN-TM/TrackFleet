@@ -163,11 +163,21 @@ function Home({ user, onLogout, onOpenTrip }) {
     <SafeAreaView style={styles.screen}>
       <StatusBar style="light" />
       <View style={styles.homeHeader}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.homeHi}>Hi{user?.name ? `, ${user.name}` : ''} 👋</Text>
-          <Text style={styles.homeOrg}>{user?.tenantName || 'Your organization'} · {user?.loginId} · v{APP_VERSION}</Text>
+          <Text style={styles.homeOrg} numberOfLines={1}>
+            {user?.tenantName || 'Your organization'} · {user?.loginId}
+          </Text>
         </View>
-        <TouchableOpacity onPress={onLogout}><Text style={styles.linkText}>Log out</Text></TouchableOpacity>
+        {/* Kept in the header: a driver must never hunt for these. */}
+        <TouchableOpacity onPress={checkNow} disabled={checking} style={styles.headBtn}>
+          {checking
+            ? <ActivityIndicator size="small" color="#60a5fa" />
+            : <Text style={styles.linkText}>{update.available ? '↑ Update' : '⟳ Update'}</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onLogout} style={styles.headBtn}>
+          <Text style={styles.linkText}>Log out</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -183,6 +193,21 @@ function Home({ user, onLogout, onOpenTrip }) {
               <Text style={styles.primaryBtnText}>⬇ Download update</Text>
             </TouchableOpacity>
           </View>
+        )}
+
+        {/* Always visible: which build this is, and a way to check on demand. */}
+        {!update.available && (
+          <TouchableOpacity style={styles.versionCard} onPress={checkNow} disabled={checking}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.versionCardTitle}>App version {APP_VERSION}</Text>
+              <Text style={styles.versionCardSub}>
+                {checking ? 'Checking…' : 'Tap to check for updates'}
+              </Text>
+            </View>
+            {checking
+              ? <ActivityIndicator size="small" color="#60a5fa" />
+              : <Text style={styles.versionCardIcon}>⟳</Text>}
+          </TouchableOpacity>
         )}
 
         <Text style={styles.sectionTitle}>TODAY’S RUNS</Text>
@@ -465,6 +490,15 @@ const styles = StyleSheet.create({
   updateBtn: { backgroundColor: '#2563eb', borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginTop: 10 },
   versionRow: { paddingVertical: 16, alignItems: 'center' },
   versionText: { color: '#64748b', fontSize: 12.5, fontWeight: '600' },
+  headBtn: { paddingHorizontal: 8, paddingVertical: 6 },
+  versionCard: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 16,
+    borderWidth: 1, borderColor: '#334155',
+  },
+  versionCardTitle: { color: '#e2e8f0', fontSize: 14, fontWeight: '700' },
+  versionCardSub: { color: '#94a3b8', fontSize: 12, marginTop: 2 },
+  versionCardIcon: { color: '#60a5fa', fontSize: 18, fontWeight: '800' },
   sectionTitle: { color: '#64748b', fontSize: 12, fontWeight: '800', letterSpacing: 1, marginBottom: 10 },
   cardBox: { backgroundColor: '#1e293b', borderRadius: 16, padding: 16, marginBottom: 14 },
   cardLive: { borderWidth: 1.5, borderColor: '#22c55e' },
