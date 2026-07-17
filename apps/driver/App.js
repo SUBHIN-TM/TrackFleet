@@ -8,7 +8,10 @@ import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import polyline from '@mapbox/polyline';
 import { apiFetch, tokenStore } from './src/api';
-import TripMap from './src/TripMap';
+// NOTE: TripMap is intentionally NOT imported — see src/TripMap.jsx. It targets
+// the old MapLibre v9 API and throws at import time on v11, which crashed the
+// app on launch. Re-enable only once it is rewritten for v11 AND tested on a
+// real device.
 // Importing this registers the background location task (must be module scope).
 import { startTracking, stopTracking, lastFixAt } from './src/locationTask';
 import { checkForUpdate, APP_VERSION } from './src/updateCheck';
@@ -423,16 +426,6 @@ function TripScreen({ tripId, onExit }) {
       )}
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 8, paddingBottom: 110 }}>
-        {/* The road ahead: where I am, the route, and which stop is next. */}
-        {live?.route?.stops?.length > 0 && (
-          <TripMap
-            stops={live.route.stops}
-            me={me}
-            routeLine={routeLine}
-            nextStop={nextStop}
-            height={260}
-          />
-        )}
         {nextStop && (
           <View style={styles.nextStopBox}>
             <Text style={styles.nextStopLabel}>NEXT STOP</Text>

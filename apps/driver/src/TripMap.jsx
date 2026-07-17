@@ -1,10 +1,18 @@
+// ⚠️ BROKEN — NOT IMPORTED ANYWHERE. DO NOT RE-ENABLE AS-IS.
+//
+// This targets @maplibre/maplibre-react-native v9. Installed is v11, which:
+//   • has NO default export        → `import MapLibreGL from ...` is undefined
+//   • has NO setAccessToken        → the call below threw AT IMPORT TIME
+//   • renamed the components       → MapView→Map, MarkerView→Marker,
+//                                    ShapeSource→GeoJSONSource
+// The undefined-default crash killed the app on launch (v1.1.0). Rewrite
+// against the v11 named exports and TEST ON A REAL DEVICE before wiring it
+// back into App.js.
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { API_URL } from './config';
 
-// No API key with MapLibre + OpenFreeMap, and it's the same style the web
-// portals use — one look across the product.
 MapLibreGL.setAccessToken(null);
 
 const FALLBACK_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
