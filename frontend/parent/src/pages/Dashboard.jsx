@@ -12,6 +12,7 @@ import PhoneRoundedIcon from '@mui/icons-material/PhoneRounded';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import LiveMap from '../components/LiveMap.jsx';
+import { EtaHero } from '../components/RideStatus.jsx';
 
 const POLL_MS = 5000;
 
@@ -163,6 +164,8 @@ export default function Dashboard() {
                 {/* Trip today (live or finished) */}
                 {t && (
                   <Stack spacing={1.2}>
+                    {/* Minutes-away headline — the reason parents open this app. */}
+                    {live && <EtaHero trip={t} childName={c.name} />}
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                       <Chip size="small" variant="outlined" icon={<RouteRoundedIcon sx={{ fontSize: 15 }} />}
                         label={`${t.routeName || 'Route'} · ${t.direction === 'DROP' ? 'Drop' : 'Pickup'}`} />

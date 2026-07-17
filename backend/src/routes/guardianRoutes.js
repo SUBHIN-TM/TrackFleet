@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
-import { asyncHandler, ApiError } from '../lib/http.js';
+import { asyncHandler, ApiError, parseOr400 } from '../lib/http.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 
 // Parent-portal API. Guardians sign in by org + phone + password and only ever
@@ -139,6 +140,75 @@ router.get(
         driver: r.trip.driver,
       })),
     });
+  })
+);
+
+// ---- Absences: "my child isn't travelling that day" -------------------------
+// Dates are stored at UTC midnight so a day is a day, not a timestamp.
+const dayOf = (s) => { const d = new Date(s); d.setUTCHours(0, 0, 0, 0); return d; };
+
+// GET /api/guardian/passengers/:id/absences — upcoming (and today's) absences.
+router.get(
+  '/passengers/:id/absences',
+  asyncHandler(async (req, res) => {
+    const p = await ownPassengerOr404(req, req.params.id);
+    const from = new Date(); from.setUTCHours(0, 0, 0, 0);
+    const absences = await prisma.absence.findMany({
+      where: { passengerId: p.id, date: { gte: from } },
+      orderBy: { date: 'asc' },
+      select: { id: true, date: true, reason: true },
+    });
+    res.json({ absences });
+  })
+);
+
+// POST /api/guardian/passengers/:id/absences — tell the org they won't travel.
+// Upsert: marking the same day twice just updates the reason.
+router.post(
+  '/passengers/:id/absences',
+  asyncHandler(async (req, res) => {
+    const p = await ownPassengerOr404(req, req.params.id);
+    const { date, reason } = parseOr400(
+      z.object({ date: z.string().min(8), reason: z.string().max(200).optional() }),
+      req.body
+    );
+    const day = dayOf(date);
+    if (Number.isNaN(day.getTime())) throw new ApiError(400, 'Enter a valid date');
+    const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+    if (day < today) throw new ApiError(400, 'Pick today or a future date');
+
+    const absence = await prisma.absence.upsert({
+      where: { passengerId_date: { passengerId: p.id, date: day } },
+      create: { passengerId: p.id, date: day, reason },
+      update: { reason },
+      select: { id: true, date: true, reason: true },
+    });
+
+    // If today's run hasn't started yet the snapshot will pick this up; if it
+    // is already running, mark them absent on it now so the driver sees it.
+    await prisma.tripPassenger.updateMany({
+      where: {
+        passengerId: p.id,
+        status: 'EXPECTED',
+        trip: { serviceDate: day, status: { in: ['STARTED', 'IN_PROGRESS'] } },
+      },
+      data: { status: 'ABSENT' },
+    });
+
+    res.status(201).json({ absence });
+  })
+);
+
+// DELETE /api/guardian/passengers/:id/absences/:absenceId — plans changed.
+router.delete(
+  '/passengers/:id/absences/:absenceId',
+  asyncHandler(async (req, res) => {
+    const p = await ownPassengerOr404(req, req.params.id);
+    const { count } = await prisma.absence.deleteMany({
+      where: { id: req.params.absenceId, passengerId: p.id },
+    });
+    if (!count) throw new ApiError(404, 'Absence not found');
+    res.status(204).end();
   })
 );
 

@@ -7,6 +7,7 @@ import DirectionsBusRoundedIcon from '@mui/icons-material/DirectionsBusRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded';
 import { useAuth } from '../lib/auth.jsx';
+import NotificationBell from '../components/NotificationBell.jsx';
 
 export default function Shell() {
   const { user, logout } = useAuth();
@@ -31,6 +32,7 @@ export default function Shell() {
               sx={{ bgcolor: 'primary.light', color: 'primary.main', fontWeight: 700, maxWidth: 240,
                 display: { xs: 'none', sm: 'flex' }, '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }} />
           )}
+          <NotificationBell />
           <IconButton onClick={(e) => setAnchor(e.currentTarget)} sx={{ ml: 0.5 }}>
             <Avatar sx={{ width: 38, height: 38, bgcolor: 'primary.main', fontSize: 14, fontWeight: 800 }}>{initials}</Avatar>
           </IconButton>

@@ -10,8 +10,11 @@ import ScheduleRoundedIcon from '@mui/icons-material/ScheduleRounded';
 import DirectionsBusRoundedIcon from '@mui/icons-material/DirectionsBusRounded';
 import PhoneRoundedIcon from '@mui/icons-material/PhoneRounded';
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
+import EventBusyRoundedIcon from '@mui/icons-material/EventBusyRounded';
+import EventAvailableRoundedIcon from '@mui/icons-material/EventAvailableRounded';
 import { api } from '../lib/api.js';
 import LiveMap from '../components/LiveMap.jsx';
+import { EtaHero, JourneyTimeline } from '../components/RideStatus.jsx';
 
 const POLL_MS = 5000;
 const DAYS = [['Mon', 1], ['Tue', 2], ['Wed', 3], ['Thu', 4], ['Fri', 5], ['Sat', 6], ['Sun', 7]];
@@ -40,10 +43,39 @@ export default function ChildDetail() {
   const [children, setChildren] = useState(null); // for the switcher + live data
   const [detail, setDetail] = useState(null);     // route + schedules
   const [journeys, setJourneys] = useState(null); // history
+  const [absences, setAbsences] = useState([]);   // days they won't travel
+  const [absBusy, setAbsBusy] = useState(false);
   const [tileUrl, setTileUrl] = useState('');
   const [styleUrl, setStyleUrl] = useState('');
   const [error, setError] = useState('');
   const timer = useRef(null);
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const absentToday = absences.some((a) => new Date(a.date).toISOString().slice(0, 10) === todayISO);
+
+  async function loadAbsences() {
+    try {
+      const { data } = await api.get(`/api/guardian/passengers/${id}/absences`);
+      setAbsences(data.absences);
+    } catch { setAbsences([]); }
+  }
+  // Tell the school the child isn't travelling — the driver's list updates too.
+  async function markAbsent(dateISO) {
+    setAbsBusy(true);
+    try {
+      await api.post(`/api/guardian/passengers/${id}/absences`, { date: dateISO });
+      await Promise.all([loadAbsences(), loadLive()]);
+    } catch (err) { setError(err.response?.data?.error || 'Could not save'); }
+    finally { setAbsBusy(false); }
+  }
+  async function unmarkAbsent(absenceId) {
+    setAbsBusy(true);
+    try {
+      await api.delete(`/api/guardian/passengers/${id}/absences/${absenceId}`);
+      await Promise.all([loadAbsences(), loadLive()]);
+    } catch (err) { setError(err.response?.data?.error || 'Could not undo'); }
+    finally { setAbsBusy(false); }
+  }
 
   const child = children?.find((c) => c.id === id) || null;
   const t = child?.trip;
@@ -68,6 +100,8 @@ export default function ChildDetail() {
     setDetail(null); setJourneys(null);
     api.get(`/api/guardian/passengers/${id}`).then(({ data }) => setDetail(data)).catch(() => setDetail({ route: null, schedules: [] }));
     api.get(`/api/guardian/passengers/${id}/journeys`).then(({ data }) => setJourneys(data.journeys)).catch(() => setJourneys([]));
+    loadAbsences();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const loc = t?.lastLocation;
@@ -120,6 +154,43 @@ export default function ChildDetail() {
             {/* ---------------- TODAY: live map or what's coming ------------- */}
             {tab === 0 && (
               <Box mt={2}>
+                {/* The headline: minutes away, or the outcome of today's ride. */}
+                {t && (
+                  <Box mb={2}>
+                    <EtaHero trip={t} childName={child.name} />
+                  </Box>
+                )}
+                {t && <Box mb={2}><JourneyTimeline trip={t} /></Box>}
+
+                {/* Plans change — let parents say so without phoning the school. */}
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap mb={2}>
+                  {absentToday ? (
+                    <Button size="small" variant="outlined" color="warning" disabled={absBusy}
+                      startIcon={<EventAvailableRoundedIcon />}
+                      onClick={() => unmarkAbsent(absences.find((a) => new Date(a.date).toISOString().slice(0, 10) === todayISO).id)}>
+                      Travelling again today
+                    </Button>
+                  ) : (
+                    <Button size="small" variant="outlined" disabled={absBusy}
+                      startIcon={<EventBusyRoundedIcon />} onClick={() => markAbsent(todayISO)}>
+                      Not travelling today
+                    </Button>
+                  )}
+                  <Button size="small" variant="outlined" disabled={absBusy}
+                    startIcon={<EventBusyRoundedIcon />}
+                    onClick={() => markAbsent(new Date(Date.now() + 864e5).toISOString().slice(0, 10))}>
+                    Not travelling tomorrow
+                  </Button>
+                </Stack>
+                {absences.length > 0 && (
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap mb={2}>
+                    {absences.map((a) => (
+                      <Chip key={a.id} size="small" color="warning" variant="outlined"
+                        label={`Absent ${dateOf(a.date)}`} onDelete={() => unmarkAbsent(a.id)} />
+                    ))}
+                  </Stack>
+                )}
+
                 {live ? (
                   <Stack spacing={1.2}>
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>

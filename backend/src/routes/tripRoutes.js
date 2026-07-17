@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { asyncHandler, ApiError, parseOr400 } from '../lib/http.js';
 import { authenticate, authorize, requireTenant } from '../middleware/auth.js';
 import { notifyUser } from '../lib/notify.js';
+import { etaBetween } from '../lib/osrm.js';
 
 // ============================================================================
 // Trips — the live layer. A TripSchedule is the plan; a Trip is one concrete
@@ -242,6 +243,14 @@ router.post(
       where: { tenantId: req.tenantId, routeId: schedule.routeId, active: true },
       include: { stopAssignments: { include: { stop: { select: { routeId: true, sequence: true } } } } },
     });
+    // Parents who told us their child isn't travelling today: start them ABSENT
+    // so the driver isn't hunting for someone who was never coming.
+    const absentToday = new Set(
+      (await prisma.absence.findMany({
+        where: { date: todayDate(), passengerId: { in: members.map((m) => m.id) } },
+        select: { passengerId: true },
+      })).map((a) => a.passengerId)
+    );
 
     const trip = await prisma.trip.create({
       data: {
@@ -257,6 +266,7 @@ router.post(
         passengers: {
           create: members.map((m) => ({
             passengerId: m.id,
+            status: absentToday.has(m.id) ? 'ABSENT' : 'EXPECTED',
             stopSequence: m.stopAssignments.find((a) => a.stop.routeId === schedule.routeId)?.stop.sequence ?? null,
           })),
         },
@@ -267,8 +277,9 @@ router.post(
 
     emitTrip(req, trip.id, 'trip:status', { status: trip.status });
 
-    // Tell the guardians the bus is on its way — best-effort.
-    for (const m of members) {
+    // Tell the guardians the bus is on its way — best-effort, and not to those
+    // who already told us their child isn't travelling today.
+    for (const m of members.filter((m) => !absentToday.has(m.id))) {
       notifyGuardians(m.id, req.tenantId, {
         type: 'TRIP_STARTED',
         title: `${schedule.route.name} has started 🚌`,
@@ -559,14 +570,34 @@ router.get(
 
         if (!best) return { ...base, trip: null };
         const t = best.trip;
-        const routeName = (await prisma.route.findUnique({ where: { id: t.routeId }, select: { name: true } }))?.name;
         const isLive = ACTIVE.includes(t.status);
+        const tripRoute = await prisma.route.findUnique({
+          where: { id: t.routeId },
+          select: { name: true, stops: { orderBy: { sequence: 'asc' }, select: { id: true, name: true, lat: true, lng: true } } },
+        });
+        const routeName = tripRoute?.name;
         const trail = isLive
           ? (await prisma.locationPoint.findMany({
               where: { tripId: t.id }, orderBy: { recordedAt: 'asc' }, take: 300,
               select: { lat: true, lng: true },
             })).map((p) => [p.lng, p.lat])
           : [];
+
+        // The question a parent is actually asking: "how long until it matters
+        // to ME?" Before boarding that's their stop; once aboard it's the last
+        // stop of the route (where the child gets off).
+        const here = isLive ? await lastLocation(t.id) : null;
+        let eta = null;
+        if (here) {
+          const target =
+            best.status === 'EXPECTED' ? stop :
+            best.status === 'ONBOARD' ? tripRoute?.stops?.[tripRoute.stops.length - 1] :
+            null;
+          if (target) {
+            const e = await etaBetween(here, target);
+            if (e) eta = { ...e, stopName: target.name, forStatus: best.status };
+          }
+        }
         return {
           ...base,
           trip: {
@@ -584,7 +615,8 @@ router.get(
             boardedAt: best.boardedAt,
             droppedAt: best.droppedAt,
             trail,
-            lastLocation: isLive ? await lastLocation(t.id) : null,
+            eta,
+            lastLocation: here,
           },
         };
       })
