@@ -8,6 +8,7 @@ import { useState } from 'react';
 import DashboardRoundedIcon from '@mui/icons-material/GridViewRounded';
 import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded';
 import CategoryRoundedIcon from '@mui/icons-material/CategoryRounded';
+import SensorsRoundedIcon from '@mui/icons-material/SensorsRounded';
 import DirectionsBusRoundedIcon from '@mui/icons-material/DirectionsBusRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
@@ -19,6 +20,7 @@ import NotificationBell from '../components/NotificationBell.jsx';
 const WIDTH = 260;
 const nav = [
   { to: '/', label: 'Dashboard', icon: <DashboardRoundedIcon /> },
+  { to: '/live', label: 'Live Map', icon: <SensorsRoundedIcon /> },
   { to: '/tenants', label: 'Organizations', icon: <ApartmentRoundedIcon /> },
   { to: '/org-types', label: 'Organization Types', icon: <CategoryRoundedIcon /> },
 ];

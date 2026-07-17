@@ -10,6 +10,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Tenants from './pages/Tenants.jsx';
 import TenantDetail from './pages/TenantDetail.jsx';
 import OrgTypes from './pages/OrgTypes.jsx';
+import LivePlatform from './pages/LivePlatform.jsx';
 
 function Protected({ children }) {
   const { user } = useAuth();
@@ -32,6 +33,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
               <Route path="tenants" element={<Tenants />} />
               <Route path="tenants/:id" element={<TenantDetail />} />
               <Route path="org-types" element={<OrgTypes />} />
+              <Route path="live" element={<LivePlatform />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

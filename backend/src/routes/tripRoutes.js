@@ -13,7 +13,6 @@ import { notifyUser } from '../lib/notify.js';
 // ============================================================================
 
 const router = Router();
-router.use(authenticate, requireTenant);
 
 const ACTIVE = ['STARTED', 'IN_PROGRESS'];
 
@@ -66,6 +65,116 @@ async function notifyGuardians(passengerId, tenantId, note) {
   });
   await Promise.all(links.map((l) => notifyUser(l.guardianId, { ...note, tenantId })));
 }
+
+// The full live picture of one trip: map route, GPS trail, bus position and the
+// passenger board. Shared by the tenant admin/driver view and the platform
+// (super-admin) view — pass tenantId to scope it, or null to allow any org.
+async function liveTripPayload(tripId, tenantId = null) {
+  const trip = await prisma.trip.findFirst({
+    where: { id: tripId, ...(tenantId ? { tenantId } : {}) },
+    include: {
+      passengers: {
+        include: { passenger: { select: { id: true, name: true, category: true, phone: true } } },
+        orderBy: { stopSequence: 'asc' },
+      },
+      vehicle: { select: { regNumber: true, fleetNo: true } },
+      driver: { select: { id: true, name: true, loginId: true, phone: true } },
+      schedule: { select: { name: true, startTime: true } },
+      tenant: { select: { id: true, name: true, slug: true } },
+    },
+  });
+  if (!trip) throw new ApiError(404, 'Trip not found');
+
+  const route = await prisma.route.findUnique({
+    where: { id: trip.routeId },
+    select: {
+      id: true, name: true,
+      stops: { orderBy: { sequence: 'asc' }, select: { id: true, name: true, lat: true, lng: true, sequence: true } },
+    },
+  });
+  // Trail: oldest→newest so the polyline draws the path travelled.
+  const trail = await prisma.locationPoint.findMany({
+    where: { tripId: trip.id },
+    orderBy: { recordedAt: 'asc' },
+    take: 500,
+    select: { lat: true, lng: true, recordedAt: true, speed: true },
+  });
+  const last = trail[trail.length - 1];
+
+  return {
+    trip: {
+      id: trip.id, status: trip.status, direction: trip.direction,
+      startedAt: trip.startedAt, endedAt: trip.endedAt,
+      scheduleName: trip.schedule?.name, startTime: trip.schedule?.startTime,
+      vehicle: trip.vehicle, driver: trip.driver, org: trip.tenant,
+      counts: tripCounts(trip.passengers),
+    },
+    passengers: trip.passengers.map((p) => ({
+      id: p.passenger.id, name: p.passenger.name, category: p.passenger.category,
+      status: p.status, boardedAt: p.boardedAt, droppedAt: p.droppedAt,
+      stopSequence: p.stopSequence,
+      stopName: route?.stops.find((s) => s.sequence === p.stopSequence)?.name || null,
+    })),
+    route,
+    trail: trail.map((p) => [p.lng, p.lat]),
+    lastLocation: last ? { lat: last.lat, lng: last.lng, recordedAt: last.recordedAt, speed: last.speed } : null,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// SUPER ADMIN — platform-wide live view. Declared BEFORE the requireTenant
+// guard below, since the platform owner has no tenant of their own.
+// ----------------------------------------------------------------------------
+
+// GET /api/trips/platform/live — every trip running right now, across all orgs.
+router.get(
+  '/platform/live',
+  authenticate,
+  authorize('SUPER_ADMIN'),
+  asyncHandler(async (req, res) => {
+    const trips = await prisma.trip.findMany({
+      where: { status: { in: ACTIVE } },
+      include: {
+        passengers: true,
+        vehicle: { select: { regNumber: true, fleetNo: true } },
+        driver: { select: { name: true, loginId: true, phone: true } },
+        schedule: { select: { name: true, startTime: true } },
+        tenant: { select: { id: true, name: true, slug: true } },
+      },
+      orderBy: { startedAt: 'desc' },
+    });
+
+    const runs = await Promise.all(
+      trips.map(async (t) => ({
+        id: t.id,
+        org: t.tenant,
+        scheduleName: t.schedule?.name,
+        direction: t.direction,
+        status: t.status,
+        startedAt: t.startedAt,
+        routeName: (await prisma.route.findUnique({ where: { id: t.routeId }, select: { name: true } }))?.name,
+        vehicle: t.vehicle,
+        driver: t.driver,
+        counts: tripCounts(t.passengers),
+        lastLocation: await lastLocation(t.id),
+      }))
+    );
+    res.json({ runs });
+  })
+);
+
+// GET /api/trips/platform/:id/live — full live detail for any org's trip.
+router.get(
+  '/platform/:id/live',
+  authenticate,
+  authorize('SUPER_ADMIN'),
+  asyncHandler(async (req, res) => {
+    res.json(await liveTripPayload(req.params.id, null));
+  })
+);
+
+// Everything below is tenant-scoped (admins, drivers, guardians).
+router.use(authenticate, requireTenant);
 
 // ----------------------------------------------------------------------------
 // DRIVER
@@ -486,53 +595,11 @@ router.get(
   '/:id/live',
   authorize('TENANT_ADMIN', 'DRIVER'),
   asyncHandler(async (req, res) => {
-    const trip = await prisma.trip.findFirst({
-      where: { id: req.params.id, tenantId: req.tenantId },
-      include: {
-        passengers: {
-          include: { passenger: { select: { id: true, name: true, category: true, phone: true } } },
-          orderBy: { stopSequence: 'asc' },
-        },
-        vehicle: { select: { regNumber: true, fleetNo: true } },
-        driver: { select: { id: true, name: true, loginId: true, phone: true } },
-        schedule: { select: { name: true, startTime: true } },
-      },
-    });
-    if (!trip) throw new ApiError(404, 'Trip not found');
-    if (req.user.role === 'DRIVER' && trip.driverId !== req.user.id) throw new ApiError(403, 'This is not your trip');
-
-    const route = await prisma.route.findUnique({
-      where: { id: trip.routeId },
-      select: { id: true, name: true, stops: { orderBy: { sequence: 'asc' }, select: { id: true, name: true, lat: true, lng: true, sequence: true } } },
-    });
-    // Trail: oldest→newest so the polyline draws the path travelled.
-    const trail = await prisma.locationPoint.findMany({
-      where: { tripId: trip.id },
-      orderBy: { recordedAt: 'asc' },
-      take: 500,
-      select: { lat: true, lng: true, recordedAt: true, speed: true },
-    });
-
-    res.json({
-      trip: {
-        id: trip.id, status: trip.status, direction: trip.direction,
-        startedAt: trip.startedAt, endedAt: trip.endedAt,
-        scheduleName: trip.schedule?.name, startTime: trip.schedule?.startTime,
-        vehicle: trip.vehicle, driver: trip.driver,
-        counts: tripCounts(trip.passengers),
-      },
-      passengers: trip.passengers.map((p) => ({
-        id: p.passenger.id, name: p.passenger.name, category: p.passenger.category,
-        status: p.status, boardedAt: p.boardedAt, droppedAt: p.droppedAt,
-        stopSequence: p.stopSequence,
-        stopName: route?.stops.find((s) => s.sequence === p.stopSequence)?.name || null,
-      })),
-      route,
-      trail: trail.map((p) => [p.lng, p.lat]),
-      lastLocation: trail.length
-        ? { lat: trail[trail.length - 1].lat, lng: trail[trail.length - 1].lng, recordedAt: trail[trail.length - 1].recordedAt, speed: trail[trail.length - 1].speed }
-        : null,
-    });
+    const payload = await liveTripPayload(req.params.id, req.tenantId);
+    if (req.user.role === 'DRIVER' && payload.trip.driver?.id !== req.user.id) {
+      throw new ApiError(403, 'This is not your trip');
+    }
+    res.json(payload);
   })
 );
 
