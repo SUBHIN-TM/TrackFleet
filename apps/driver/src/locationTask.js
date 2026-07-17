@@ -72,6 +72,22 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   }
 });
 
+// Actively acquire a FRESH fix and send it, returning [lng, lat] for the UI.
+//
+// The background stream replays Android's cached location, which can be minutes
+// old while the screen shows something newer — the driver and the admin then
+// see different places. Everything on screen comes through here, so what the
+// driver sees is exactly what the server (and the admin) gets.
+export async function pushCurrentFix(tripId) {
+  const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
+  try {
+    await postFix(tripId, p);
+  } catch {
+    // Couldn't upload (offline) — still show it locally; the stream retries.
+  }
+  return [p.coords.longitude, p.coords.latitude];
+}
+
 // Start streaming for a trip. Returns 'on' | 'denied' | 'error'.
 export async function startTracking(tripId) {
   const fg = await Location.requestForegroundPermissionsAsync();

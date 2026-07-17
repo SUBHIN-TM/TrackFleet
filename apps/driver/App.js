@@ -12,7 +12,7 @@ import { apiFetch, tokenStore } from './src/api';
 // must still work (v1.1.0 shipped a map crash that killed the whole app).
 import SafeMap from './src/SafeMap';
 // Importing this registers the background location task (must be module scope).
-import { startTracking, stopTracking, lastFixAt } from './src/locationTask';
+import { startTracking, stopTracking, lastFixAt, pushCurrentFix } from './src/locationTask';
 import { checkForUpdate, APP_VERSION } from './src/updateCheck';
 
 // ============================================================================
@@ -294,6 +294,9 @@ function TripScreen({ tripId, onExit }) {
 
   const [me, setMe] = useState(null);          // driver's own position, for the map
   const [routeLine, setRouteLine] = useState([]);
+  // Page scrolling is frozen while a finger is on the map, or the ScrollView
+  // and the map fight over the same gesture and panning judders.
+  const [pageScroll, setPageScroll] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -308,24 +311,37 @@ function TripScreen({ tripId, onExit }) {
     return () => clearInterval(t);
   }, [load]);
 
-  // Our own dot on the map: read the cached fix rather than open a second GPS
-  // session — the background task is already the one burning the radio.
+  // While the trip screen is open, WE are the source of truth: actively pull a
+  // fresh fix and send that exact fix on. Reading Android's cached location
+  // instead let the driver see one place while the admin saw a frozen fix from
+  // minutes earlier. The background task still covers a locked screen.
   useEffect(() => {
     let alive = true;
     const tick = async () => {
       try {
-        // getLastKnownPosition only reads a CACHED fix — on a phone that hasn't
-        // moved there may be none, which left the map with no bus at all. Fall
-        // back to actively asking for one.
-        let p = await Location.getLastKnownPositionAsync();
-        if (!p) p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        if (alive && p) setMe([p.coords.longitude, p.coords.latitude]);
-      } catch { /* no fix yet */ }
+        const pos = await pushCurrentFix(tripId);
+        if (alive) setMe(pos);
+      } catch { /* no fix available right now */ }
     };
     tick();
-    const t = setInterval(tick, 3000);
+    const t = setInterval(tick, 5000);
     return () => { alive = false; clearInterval(t); };
-  }, []);
+  }, [tripId]);
+
+  // Manual re-sync, for when the driver wants to force the issue.
+  const [syncing, setSyncing] = useState(false);
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      const pos = await pushCurrentFix(tripId);
+      setMe(pos);
+      const at = await lastFixAt();
+      setFixAge(at ? Math.round((Date.now() - at) / 1000) : null);
+      Alert.alert('Position sent', `Your location was just shared:\n${pos[1].toFixed(5)}, ${pos[0].toFixed(5)}`);
+    } catch (err) {
+      Alert.alert('Couldn’t get a fix', 'Make sure location is on and you have a clear view of the sky, then try again.');
+    } finally { setSyncing(false); }
+  }
 
   // Road-snapped path through the stops — fetched once; stops don't move.
   useEffect(() => {
@@ -423,12 +439,19 @@ function TripScreen({ tripId, onExit }) {
         <Text style={[styles.gpsBadge, gps === 'on' ? styles.gpsOn : styles.gpsOff]}>{gpsLabel}</Text>
       </View>
 
-      {/* Proof the GPS is alive: the driver's own coordinates, ticking. */}
-      {me && (
+      {/* Proof the GPS is alive: the driver's own coordinates, ticking — plus a
+          way to force a fresh position if the admin says it looks stuck. */}
+      <View style={styles.gpsRow}>
         <Text style={styles.gpsCoords}>
-          📍 {me[1].toFixed(5)}, {me[0].toFixed(5)}{fixAge != null ? ` · sent ${fixAge}s ago` : ''}
+          {me ? `📍 ${me[1].toFixed(5)}, ${me[0].toFixed(5)}` : '📍 waiting for GPS…'}
+          {fixAge != null ? ` · sent ${fixAge}s ago` : ''}
         </Text>
-      )}
+        <TouchableOpacity style={styles.syncBtn} onPress={syncNow} disabled={syncing}>
+          {syncing
+            ? <ActivityIndicator size="small" color="#60a5fa" />
+            : <Text style={styles.syncText}>⟳ Sync position</Text>}
+        </TouchableOpacity>
+      </View>
 
       {counts && (
         <View style={styles.countRow}>
@@ -439,10 +462,12 @@ function TripScreen({ tripId, onExit }) {
         </View>
       )}
 
-      <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 8, paddingBottom: 110 }}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 8, paddingBottom: 110 }}
+        scrollEnabled={pageScroll}>
         {/* Where I am, the road ahead, and proof the GPS is alive. */}
         {live?.route?.stops?.length > 0 && (
-          <SafeMap stops={live.route.stops} me={me} routeLine={routeLine} nextStop={nextStop} height={280} />
+          <SafeMap stops={live.route.stops} me={me} routeLine={routeLine} nextStop={nextStop} height={280}
+            onGrab={() => setPageScroll(false)} onRelease={() => setPageScroll(true)} />
         )}
 
         {nextStop && (
@@ -589,7 +614,10 @@ const styles = StyleSheet.create({
   tripHeader: { padding: 20, paddingTop: 46, gap: 6 },
   tripTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
   gpsBadge: { fontSize: 12.5, fontWeight: '700' },
-  gpsCoords: { color: '#64748b', fontSize: 11.5, paddingHorizontal: 20, paddingBottom: 6, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  gpsRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 8, gap: 10 },
+  gpsCoords: { color: '#64748b', fontSize: 11.5, flex: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  syncBtn: { backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#3b82f6', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  syncText: { color: '#60a5fa', fontSize: 12, fontWeight: '800' },
   gpsOn: { color: '#22c55e' },
   gpsOff: { color: '#f59e0b' },
   nextStopBox: { backgroundColor: '#14532d', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#16a34a' },

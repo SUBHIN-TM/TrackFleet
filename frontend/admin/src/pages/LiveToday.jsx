@@ -52,12 +52,12 @@ function gpsHealth(lastLocation) {
   if (age <= 180) {
     return {
       label: `GPS delayed · ${ageText(age)}`, color: 'warning',
-      help: 'No fix for a while — usually a weak mobile signal. It should catch up on its own.',
+      help: 'No fresh fix for a while — usually a weak signal, or the phone is indoors. The pin below is where the bus was, not necessarily where it is.',
     };
   }
   return {
     label: `GPS lost · ${ageText(age)}`, color: 'error',
-    help: 'The phone stopped sending. The app may be closed, location turned off, or the battery dead. Call the driver.',
+    help: 'No fresh position for several minutes — the pin is stale, so don’t trust it. The phone can look perfectly fine and still fail to get a satellite fix (indoors, tunnel, or Android power-saving). Ask the driver to open the app and tap “Sync position”.',
   };
 }
 

@@ -12,11 +12,24 @@ const FALLBACK_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
 // The driver's own view: where I am, the road ahead, which stop is next — and
 // proof their GPS is alive (the dot moves with them).
-export default function TripMap({ stops = [], me, routeLine = [], nextStop, height = 260 }) {
+export default function TripMap({ stops = [], me, routeLine = [], nextStop, height = 260, onGrab, onRelease }) {
   const [styleUrl, setStyleUrl] = useState(null);
   const [ready, setReady] = useState(false);
   const [follow, setFollow] = useState(true);
+  const [zoom, setZoom] = useState(15);
   const camera = useRef(null);
+
+  // Zoom by button: pinching inside a scrolling page is fiddly, and on a moving
+  // bus the driver has one hand at best.
+  const zoomBy = (delta) => {
+    const z = Math.max(4, Math.min(19, zoom + delta));
+    setZoom(z);
+    camera.current?.zoomTo(z, { duration: 250 });
+  };
+  const recenter = () => {
+    setFollow(true);
+    if (me) camera.current?.easeTo({ center: me, zoom: Math.max(zoom, 15), duration: 500 });
+  };
 
   // The server owns the style, so the provider can change without a new APK.
   useEffect(() => {
@@ -28,10 +41,12 @@ export default function TripMap({ stops = [], me, routeLine = [], nextStop, heig
     return () => { alive = false; };
   }, []);
 
-  // Keep the driver centred while they drive, unless they panned away to look.
+  // Keep the driver centred while they drive — but only while following, so a
+  // manual pan isn't yanked back by the next GPS fix. Zoom is left alone: the
+  // camera must never fight the driver's own zoom buttons.
   useEffect(() => {
     if (ready && follow && me && camera.current) {
-      camera.current.easeTo({ center: me, zoom: 15, duration: 800 });
+      camera.current.easeTo({ center: me, duration: 800 });
     }
   }, [me?.[0], me?.[1], follow, ready]);
 
@@ -44,12 +59,18 @@ export default function TripMap({ stops = [], me, routeLine = [], nextStop, heig
     : null;
 
   return (
-    <View style={[styles.wrap, { height }]}>
+    // onTouchStart/End tell the parent to freeze page scrolling while a finger
+    // is on the map — otherwise the ScrollView steals the gesture and panning
+    // judders. Touching the map also drops follow, so it stops snapping back.
+    <View style={[styles.wrap, { height }]}
+      onTouchStart={() => { setFollow(false); onGrab?.(); }}
+      onTouchEnd={() => onRelease?.()}
+      onTouchCancel={() => onRelease?.()}>
       <Map style={{ flex: 1 }} mapStyle={styleUrl} logo={false} attribution compass
         onDidFinishLoadingMap={() => setReady(true)}>
         <Camera ref={camera}
           center={me || (stops[0] ? [stops[0].lng, stops[0].lat] : [76.93, 8.52])}
-          zoom={14} />
+          zoom={zoom} />
 
         {/* The road ahead, drawn under the pins */}
         {line && (
@@ -77,8 +98,20 @@ export default function TripMap({ stops = [], me, routeLine = [], nextStop, heig
         )}
       </Map>
 
-      <TouchableOpacity style={[styles.followBtn, follow && styles.followOn]} onPress={() => setFollow((f) => !f)}>
-        <Text style={[styles.followText, follow && { color: '#fff' }]}>{follow ? '◎ Following' : '◎ Follow me'}</Text>
+      {/* Buttons, because pinch-zoom on a moving bus with one hand is hopeless */}
+      <View style={styles.zoomCol}>
+        <TouchableOpacity style={[styles.mapBtn, styles.mapBtnTop]} onPress={() => zoomBy(1)}>
+          <Text style={styles.mapBtnText}>＋</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.mapBtn} onPress={() => zoomBy(-1)}>
+          <Text style={styles.mapBtnText}>−</Text>
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity style={[styles.followBtn, follow && styles.followOn]} onPress={recenter}>
+        <Text style={[styles.followText, follow && { color: '#fff' }]}>
+          {follow ? '◎ Following' : '◎ Centre on me'}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -97,6 +130,12 @@ const styles = StyleSheet.create({
     width: 34, height: 34, borderRadius: 17, backgroundColor: '#fff',
     borderWidth: 2.5, borderColor: '#1d4ed8', alignItems: 'center', justifyContent: 'center',
   },
+  zoomCol: { position: 'absolute', top: 10, right: 10, borderRadius: 10, overflow: 'hidden' },
+  mapBtn: {
+    width: 40, height: 40, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center',
+  },
+  mapBtnTop: { borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+  mapBtnText: { fontSize: 20, fontWeight: '800', color: '#334155', lineHeight: 24 },
   followBtn: {
     position: 'absolute', bottom: 10, right: 10, backgroundColor: '#fff',
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20,
