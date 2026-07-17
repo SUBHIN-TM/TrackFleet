@@ -7,6 +7,7 @@ import theme from './theme.js';
 import Login from './pages/Login.jsx';
 import Shell from './pages/Shell.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import ChildDetail from './pages/ChildDetail.jsx';
 
 function Protected({ children }) {
   const { user } = useAuth();
@@ -26,6 +27,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<Protected><Shell /></Protected>}>
               <Route index element={<Dashboard />} />
+              <Route path="child/:id" element={<ChildDetail />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Card, CardContent, Stack, Chip, Avatar, Skeleton, Alert, Divider,
 } from '@mui/material';
@@ -26,6 +27,7 @@ const timeOf = (d) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit',
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const nav = useNavigate();
   const [children, setChildren] = useState(null);
   const [error, setError] = useState('');
   const [tileUrl, setTileUrl] = useState('');
@@ -87,7 +89,12 @@ export default function Dashboard() {
           const st = t ? (MY_STATUS[t.myStatus] || MY_STATUS.EXPECTED) : null;
           const loc = t?.lastLocation;
           return (
-            <Card key={c.id} sx={live ? { border: '1.5px solid', borderColor: 'success.main' } : undefined}>
+            <Card key={c.id} onClick={() => nav(`/child/${c.id}`)}
+              sx={{
+                cursor: 'pointer', transition: 'transform .15s, box-shadow .15s',
+                '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 10px 30px rgba(37,99,235,.12)' },
+                ...(live ? { border: '1.5px solid', borderColor: 'success.main' } : {}),
+              }}>
               <CardContent>
                 {/* Who */}
                 <Stack direction="row" spacing={2} alignItems="center">
@@ -142,7 +149,7 @@ export default function Dashboard() {
                           ))}
                         </Stack>
                         <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-                          Live tracking starts the moment the driver begins the trip.
+                          Live tracking starts the moment the driver begins the trip. Tap for route &amp; history.
                         </Typography>
                       </Box>
                     ) : (
