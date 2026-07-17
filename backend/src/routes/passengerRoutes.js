@@ -170,18 +170,65 @@ const updateSchema = z.object({
   phone: z.string().optional(),
   homeAddress: z.string().optional(),
   active: z.boolean().optional(),
+  // Editing can also re-tag the route/stop. null clears; omitted leaves as-is.
+  routeId: z.string().nullable().optional(),
+  stopId: z.string().nullable().optional(),
 });
 
 // PATCH /api/passengers/:id
 router.patch(
   '/:id',
   asyncHandler(async (req, res) => {
-    const data = parseOr400(updateSchema, req.body);
-    const result = await prisma.passenger.updateMany({
+    const { routeId, stopId, ...data } = parseOr400(updateSchema, req.body);
+    const existing = await prisma.passenger.findFirst({
       where: { id: req.params.id, tenantId: req.tenantId },
-      data,
     });
-    if (result.count === 0) throw new ApiError(404, 'Passenger not found');
+    if (!existing) throw new ApiError(404, 'Passenger not found');
+
+    await prisma.$transaction(async (tx) => {
+      // Route membership first — the stop must agree with it.
+      let effectiveRouteId = existing.routeId;
+      if (routeId !== undefined) {
+        if (routeId) {
+          const route = await tx.route.findFirst({ where: { id: routeId, tenantId: req.tenantId } });
+          if (!route) throw new ApiError(400, 'That route is not in this organization');
+        }
+        effectiveRouteId = routeId;
+      }
+
+      await tx.passenger.update({
+        where: { id: existing.id },
+        data: { ...data, ...(routeId !== undefined ? { routeId } : {}) },
+      });
+
+      if (stopId !== undefined) {
+        // Replace the boarding stop wholesale (a passenger has exactly one).
+        await tx.stopAssignment.deleteMany({ where: { passengerId: existing.id } });
+        if (stopId) {
+          const stop = await tx.stop.findFirst({
+            where: { id: stopId, route: { tenantId: req.tenantId } },
+          });
+          if (!stop) throw new ApiError(400, 'That stop is not in this organization');
+          if (effectiveRouteId && stop.routeId !== effectiveRouteId) {
+            throw new ApiError(400, 'That stop is not on the selected route');
+          }
+          // No route picked? Adopt the stop's route so the two always agree.
+          if (!effectiveRouteId) {
+            await tx.passenger.update({ where: { id: existing.id }, data: { routeId: stop.routeId } });
+          }
+          await tx.stopAssignment.create({ data: { stopId: stop.id, passengerId: existing.id } });
+        }
+      } else if (routeId !== undefined) {
+        // Route changed without choosing a stop — drop stops that no longer fit.
+        await tx.stopAssignment.deleteMany({
+          where: {
+            passengerId: existing.id,
+            ...(routeId ? { stop: { routeId: { not: routeId } } } : {}),
+          },
+        });
+      }
+    });
+
     const passenger = await prisma.passenger.findUnique({
       where: { id: req.params.id },
       include: passengerInclude,

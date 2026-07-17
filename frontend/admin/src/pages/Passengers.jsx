@@ -76,9 +76,12 @@ export default function Passengers() {
   function openAdd() { setEditing(null); setForm(empty); setError(''); setOpen(true); }
   function openEdit(p) {
     setEditing(p);
+    // Prefill the tagged route + stop so both can be changed from here too.
     setForm({
       ...empty, addGuardian: false,
-      name: p.name || '', category: p.category || '', phone: p.phone || '', homeAddress: p.homeAddress || '',
+      name: p.name || '', category: p.category || '', phone: p.phone || '',
+      routeId: p.route?.id || '',
+      stopId: p.stopAssignments?.[0]?.stopId || '',
     });
     setError(''); setOpen(true);
   }
@@ -88,13 +91,16 @@ export default function Passengers() {
     try {
       if (editing) {
         await api.patch(`/api/passengers/${editing.id}`, {
-          name: form.name, category: form.category, phone: form.phone, homeAddress: form.homeAddress,
+          name: form.name, category: form.category, phone: form.phone,
+          // '' -> null clears the tag; a value re-tags them.
+          routeId: form.routeId || null,
+          stopId: form.stopId || null,
         });
         setOpen(false); load();
         return;
       }
       const body = {
-        name: form.name, category: form.category, phone: form.phone, homeAddress: form.homeAddress,
+        name: form.name, category: form.category, phone: form.phone,
         ...(form.routeId ? { routeId: form.routeId } : {}),
         ...(form.stopId ? { stopId: form.stopId } : {}),
       };
@@ -215,25 +221,25 @@ export default function Passengers() {
             <TextField label="Passenger phone" value={form.phone} onChange={(e) => set('phone', e.target.value)}
               helperText="Optional — the passenger's own number, if they have one." />
 
+            <Divider>Pickup / drop stop</Divider>
+            <Stack direction="row" spacing={2}>
+              <TextField select fullWidth label="Route" value={form.routeId}
+                onChange={(e) => setForm((f) => ({ ...f, routeId: e.target.value, stopId: '' }))}
+                helperText="Optional — pick the route first">
+                <MenuItem value=""><em>None</em></MenuItem>
+                {routes.map((r) => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}
+              </TextField>
+              <TextField select fullWidth label="Stop" value={form.stopId}
+                onChange={(e) => set('stopId', e.target.value)}
+                disabled={!form.routeId}
+                helperText={form.routeId && stopsForRoute.length === 0 ? 'This route has no stops' : 'Where they board/alight'}>
+                <MenuItem value=""><em>None</em></MenuItem>
+                {stopsForRoute.map((s) => <MenuItem key={s.id} value={s.id}>{s.sequence}. {s.name}</MenuItem>)}
+              </TextField>
+            </Stack>
+
             {!editing && (
               <>
-                <Divider>Pickup / drop stop</Divider>
-                <Stack direction="row" spacing={2}>
-                  <TextField select fullWidth label="Route" value={form.routeId}
-                    onChange={(e) => setForm((f) => ({ ...f, routeId: e.target.value, stopId: '' }))}
-                    helperText="Optional — pick the route first">
-                    <MenuItem value=""><em>None</em></MenuItem>
-                    {routes.map((r) => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}
-                  </TextField>
-                  <TextField select fullWidth label="Stop" value={form.stopId}
-                    onChange={(e) => set('stopId', e.target.value)}
-                    disabled={!form.routeId}
-                    helperText={form.routeId && stopsForRoute.length === 0 ? 'This route has no stops' : 'Where they board/alight'}>
-                    <MenuItem value=""><em>None</em></MenuItem>
-                    {stopsForRoute.map((s) => <MenuItem key={s.id} value={s.id}>{s.sequence}. {s.name}</MenuItem>)}
-                  </TextField>
-                </Stack>
-
                 <FormControlLabel control={<Checkbox checked={form.addGuardian} onChange={(e) => set('addGuardian', e.target.checked)} />} label="Create a parent/guardian login" />
                 {form.addGuardian && (
                   <>
@@ -250,9 +256,6 @@ export default function Passengers() {
                   </>
                 )}
               </>
-            )}
-            {editing && (
-              <TextField label="Home / pickup address (optional)" value={form.homeAddress} onChange={(e) => set('homeAddress', e.target.value)} />
             )}
           </Stack>
         </DialogContent>
