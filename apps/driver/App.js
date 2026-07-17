@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView, View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Alert, RefreshControl,
+  Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { apiFetch, tokenStore } from './src/api';
 // Importing this registers the background location task (must be module scope).
 import { startTracking, stopTracking, lastFixAt } from './src/locationTask';
+import { checkForUpdate, APP_VERSION } from './src/updateCheck';
 
 // ============================================================================
 // TrackFleet Driver — sign in, see today's runs, start a trip, tick the
@@ -120,6 +122,8 @@ function Home({ user, onLogout, onOpenTrip }) {
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [startingId, setStartingId] = useState(null);
+  const [update, setUpdate] = useState({ available: false });
+  const [checking, setChecking] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -130,6 +134,20 @@ function Home({ user, onLogout, onOpenTrip }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Nothing updates a sideloaded APK on its own — tell the driver instead.
+  useEffect(() => { checkForUpdate().then(setUpdate); }, []);
+
+  // Manual check, so a driver can confirm they're current instead of wondering.
+  async function checkNow() {
+    setChecking(true);
+    const u = await checkForUpdate();
+    setUpdate(u);
+    setChecking(false);
+    if (!u.available) {
+      Alert.alert('You’re up to date', `TrackFleet Driver v${APP_VERSION} is the latest version.`);
+    }
+  }
 
   async function startTrip(s) {
     setStartingId(s.id);
@@ -147,7 +165,7 @@ function Home({ user, onLogout, onOpenTrip }) {
       <View style={styles.homeHeader}>
         <View style={{ flex: 1 }}>
           <Text style={styles.homeHi}>Hi{user?.name ? `, ${user.name}` : ''} 👋</Text>
-          <Text style={styles.homeOrg}>{user?.tenantName || 'Your organization'} · {user?.loginId}</Text>
+          <Text style={styles.homeOrg}>{user?.tenantName || 'Your organization'} · {user?.loginId} · v{APP_VERSION}</Text>
         </View>
         <TouchableOpacity onPress={onLogout}><Text style={styles.linkText}>Log out</Text></TouchableOpacity>
       </View>
@@ -156,6 +174,17 @@ function Home({ user, onLogout, onOpenTrip }) {
         contentContainerStyle={{ padding: 20, paddingTop: 4 }}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor="#94a3b8"
           onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}>
+        {update.available && (
+          <View style={styles.updateBox}>
+            <Text style={styles.updateTitle}>Update available · v{update.version}</Text>
+            {!!update.notes && <Text style={styles.updateNotes}>{update.notes}</Text>}
+            <Text style={styles.updateNotes}>You’re on v{APP_VERSION}. Downloading installs over this app — your login stays.</Text>
+            <TouchableOpacity style={styles.updateBtn} onPress={() => Linking.openURL(update.apkUrl)}>
+              <Text style={styles.primaryBtnText}>⬇ Download update</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <Text style={styles.sectionTitle}>TODAY’S RUNS</Text>
         {!!error && <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View>}
         {schedules === null && <ActivityIndicator color="#3b82f6" style={{ marginTop: 30 }} />}
@@ -204,6 +233,17 @@ function Home({ user, onLogout, onOpenTrip }) {
             </View>
           );
         })}
+
+        {/* Current version + a way to check on demand. */}
+        <TouchableOpacity style={styles.versionRow} onPress={checkNow} disabled={checking}>
+          {checking ? (
+            <ActivityIndicator size="small" color="#60a5fa" />
+          ) : (
+            <Text style={styles.versionText}>
+              TrackFleet Driver v{APP_VERSION} · {update.available ? 'Update available ↑' : 'Tap to check for updates'}
+            </Text>
+          )}
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -419,6 +459,12 @@ const styles = StyleSheet.create({
   homeHeader: { padding: 20, paddingTop: 46, flexDirection: 'row', alignItems: 'center' },
   homeHi: { color: '#fff', fontSize: 24, fontWeight: '800' },
   homeOrg: { color: '#94a3b8', fontSize: 13, marginTop: 2 },
+  updateBox: { backgroundColor: '#1e3a8a', borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#3b82f6' },
+  updateTitle: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  updateNotes: { color: '#bfdbfe', fontSize: 12.5, marginTop: 4, lineHeight: 17 },
+  updateBtn: { backgroundColor: '#2563eb', borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginTop: 10 },
+  versionRow: { paddingVertical: 16, alignItems: 'center' },
+  versionText: { color: '#64748b', fontSize: 12.5, fontWeight: '600' },
   sectionTitle: { color: '#64748b', fontSize: 12, fontWeight: '800', letterSpacing: 1, marginBottom: 10 },
   cardBox: { backgroundColor: '#1e293b', borderRadius: 16, padding: 16, marginBottom: 14 },
   cardLive: { borderWidth: 1.5, borderColor: '#22c55e' },

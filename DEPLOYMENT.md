@@ -76,10 +76,29 @@ cd D:\TrioDev\TrackFleet
 scp apps/driver/android/app/build/outputs/apk/release/app-release.apk root@157.173.122.163:/var/www/trackfleet-app/downloads/trackfleet-driver.apk
 ```
 
-### Step 4 — drivers update their phones
+### Step 4 — ⚠️ publish the new version number (this is what tells drivers)
 
-They open the same link again → download → install **over the old app**
-(no uninstall; their login survives):
+The app checks this file on every launch and shows an **update banner**. If you
+skip this, drivers never learn there's a new build.
+
+```bash
+ssh root@157.173.122.163 'cat > /var/www/trackfleet-app/downloads/driver-version.json <<EOF
+{
+  "version": "1.0.4",
+  "versionCode": 5,
+  "apkUrl": "https://trackfleet.360turningpoint.com/downloads/trackfleet-driver.apk",
+  "notes": "What changed, in one line for the driver."
+}
+EOF'
+```
+
+Keep `version` identical to `app.json`.
+
+### Step 5 — drivers update themselves
+
+On next launch they see **"Update available · v1.0.4"** → **Download update** →
+installs **over the old app** (no uninstall; their login survives). The same
+link still works if you'd rather send it:
 `https://trackfleet.360turningpoint.com/downloads/trackfleet-driver.apk`
 
 > 🔑 **Never lose `apps/driver/android/app/trackfleet-driver.keystore`** (and the
