@@ -12,7 +12,7 @@ import { apiFetch, tokenStore } from './src/api';
 // must still work (v1.1.0 shipped a map crash that killed the whole app).
 import SafeMap from './src/SafeMap';
 // Importing this registers the background location task (must be module scope).
-import { startTracking, stopTracking, lastFixAt, pushCurrentFix } from './src/locationTask';
+import { startTracking, stopTracking, lastFixAt, pushCurrentFix, flushQueue, queuedCount } from './src/locationTask';
 import { checkForUpdate, APP_VERSION } from './src/updateCheck';
 
 // ============================================================================
@@ -315,30 +315,47 @@ function TripScreen({ tripId, onExit }) {
   // fresh fix and send that exact fix on. Reading Android's cached location
   // instead let the driver see one place while the admin saw a frozen fix from
   // minutes earlier. The background task still covers a locked screen.
+  const [offline, setOffline] = useState(0); // fixes waiting for a connection
+
   useEffect(() => {
     let alive = true;
     const tick = async () => {
       try {
-        const pos = await pushCurrentFix(tripId);
-        if (alive) setMe(pos);
-      } catch { /* no fix available right now */ }
+        const { pos, sent, queued } = await pushCurrentFix(tripId);
+        if (!alive) return;
+        setMe(pos);
+        setOffline(sent ? queued : queued || 1);
+      } catch {
+        // No fix available right now — leave the map where it is.
+      }
     };
     tick();
     const t = setInterval(tick, 5000);
     return () => { alive = false; clearInterval(t); };
   }, [tripId]);
 
-  // Manual re-sync, for when the driver wants to force the issue.
+  // Manual re-sync. Reports what ACTUALLY happened: claiming "sent" while
+  // offline is how a driver ends up believing they're tracked when they're not.
   const [syncing, setSyncing] = useState(false);
   async function syncNow() {
     setSyncing(true);
     try {
-      const pos = await pushCurrentFix(tripId);
+      const { pos, sent, queued } = await pushCurrentFix(tripId);
       setMe(pos);
+      setOffline(queued);
       const at = await lastFixAt();
       setFixAge(at ? Math.round((Date.now() - at) / 1000) : null);
-      Alert.alert('Position sent', `Your location was just shared:\n${pos[1].toFixed(5)}, ${pos[0].toFixed(5)}`);
-    } catch (err) {
+      const where = `${pos[1].toFixed(5)}, ${pos[0].toFixed(5)}`;
+      if (sent) {
+        Alert.alert('Position shared ✅', `The organization and parents can now see you here:\n${where}`);
+      } else {
+        Alert.alert(
+          'No connection — not shared yet',
+          `Your position (${where}) is saved on the phone and will be sent automatically the moment you're back online.` +
+          (queued > 1 ? `\n\n${queued} positions are waiting.` : '')
+        );
+      }
+    } catch {
       Alert.alert('Couldn’t get a fix', 'Make sure location is on and you have a clear view of the sky, then try again.');
     } finally { setSyncing(false); }
   }
@@ -364,11 +381,16 @@ function TripScreen({ tripId, onExit }) {
       const state = await startTracking(tripId);
       if (alive) setGps(state);
     })();
-    // Show how fresh the last sent fix is, so a stalled GPS is obvious.
+    // Show how fresh the last SENT fix is, so a stalled feed is obvious, and
+    // keep retrying the backlog — signal comes back without anyone noticing.
     const t = setInterval(async () => {
       const at = await lastFixAt();
       if (alive) setFixAge(at ? Math.round((Date.now() - at) / 1000) : null);
-    }, 2000);
+      if ((await queuedCount()) > 0) {
+        const { left } = await flushQueue();
+        if (alive) setOffline(left);
+      }
+    }, 4000);
     return () => { alive = false; clearInterval(t); };
   }, [tripId]);
 
@@ -438,6 +460,17 @@ function TripScreen({ tripId, onExit }) {
         <Text style={styles.tripTitle}>{live?.trip?.scheduleName || 'Trip'}</Text>
         <Text style={[styles.gpsBadge, gps === 'on' ? styles.gpsOn : styles.gpsOff]}>{gpsLabel}</Text>
       </View>
+
+      {/* Offline is not a footnote: while this shows, nobody can see the bus. */}
+      {offline > 0 && (
+        <View style={styles.offlineBox}>
+          <Text style={styles.offlineTitle}>⚠️ No connection — you are not being tracked</Text>
+          <Text style={styles.offlineSub}>
+            {offline} position{offline === 1 ? '' : 's'} saved on this phone. They’ll send automatically
+            when the signal returns — keep the app open.
+          </Text>
+        </View>
+      )}
 
       {/* Proof the GPS is alive: the driver's own coordinates, ticking — plus a
           way to force a fresh position if the admin says it looks stuck. */}
@@ -614,6 +647,9 @@ const styles = StyleSheet.create({
   tripHeader: { padding: 20, paddingTop: 46, gap: 6 },
   tripTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
   gpsBadge: { fontSize: 12.5, fontWeight: '700' },
+  offlineBox: { backgroundColor: '#7c2d12', borderColor: '#f97316', borderWidth: 1, borderRadius: 12, padding: 12, marginHorizontal: 20, marginBottom: 8 },
+  offlineTitle: { color: '#fed7aa', fontWeight: '800', fontSize: 13.5 },
+  offlineSub: { color: '#fdba74', fontSize: 12, marginTop: 3, lineHeight: 16 },
   gpsRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 8, gap: 10 },
   gpsCoords: { color: '#64748b', fontSize: 11.5, flex: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   syncBtn: { backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#3b82f6', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
