@@ -1,91 +1,81 @@
-// ⚠️ BROKEN — NOT IMPORTED ANYWHERE. DO NOT RE-ENABLE AS-IS.
-//
-// This targets @maplibre/maplibre-react-native v9. Installed is v11, which:
-//   • has NO default export        → `import MapLibreGL from ...` is undefined
-//   • has NO setAccessToken        → the call below threw AT IMPORT TIME
-//   • renamed the components       → MapView→Map, MarkerView→Marker,
-//                                    ShapeSource→GeoJSONSource
-// The undefined-default crash killed the app on launch (v1.1.0). Rewrite
-// against the v11 named exports and TEST ON A REAL DEVICE before wiring it
-// back into App.js.
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import MapLibreGL from '@maplibre/maplibre-react-native';
+// MapLibre RN v11: NAMED exports only, no default, no access token.
+// Component/prop names differ from v9 — verified against the installed
+// typings: Map(mapStyle) · Camera(ref.easeTo{center}) · Marker(lngLat) ·
+// GeoJSONSource(data) · Layer(type/paint). Getting these wrong crashes the
+// app at import time, which is exactly what v1.1.0 did.
+import { Map, Camera, Marker, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
 import { API_URL } from './config';
-
-MapLibreGL.setAccessToken(null);
 
 const FALLBACK_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
-// The driver's own view of the run: where they are, the road ahead, and which
-// stop is next. Without this a driver on an unfamiliar route is flying blind.
+// The driver's own view: where I am, the road ahead, which stop is next — and
+// proof their GPS is alive (the dot moves with them).
 export default function TripMap({ stops = [], me, routeLine = [], nextStop, height = 260 }) {
   const [styleUrl, setStyleUrl] = useState(null);
+  const [ready, setReady] = useState(false);
   const [follow, setFollow] = useState(true);
   const camera = useRef(null);
 
-  // The server owns the map style (swap providers without shipping an APK).
+  // The server owns the style, so the provider can change without a new APK.
   useEffect(() => {
+    let alive = true;
     fetch(`${API_URL}/api/map/config`)
       .then((r) => r.json())
-      .then((c) => setStyleUrl(c.styleUrl || FALLBACK_STYLE))
-      .catch(() => setStyleUrl(FALLBACK_STYLE));
+      .then((c) => alive && setStyleUrl(c.styleUrl || FALLBACK_STYLE))
+      .catch(() => alive && setStyleUrl(FALLBACK_STYLE));
+    return () => { alive = false; };
   }, []);
 
-  // Keep the driver centred while they drive, unless they panned away.
+  // Keep the driver centred while they drive, unless they panned away to look.
   useEffect(() => {
-    if (follow && me && camera.current) {
-      camera.current.setCamera({ centerCoordinate: me, zoomLevel: 15, animationDuration: 800 });
+    if (ready && follow && me && camera.current) {
+      camera.current.easeTo({ center: me, zoom: 15, duration: 800 });
     }
-  }, [me?.[0], me?.[1], follow]);
+  }, [me?.[0], me?.[1], follow, ready]);
 
   if (!styleUrl) {
     return <View style={[styles.wrap, { height }, styles.center]}><ActivityIndicator color="#3b82f6" /></View>;
   }
 
   const line = routeLine.length >= 2
-    ? { type: 'Feature', geometry: { type: 'LineString', coordinates: routeLine } }
+    ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeLine } }
     : null;
 
   return (
     <View style={[styles.wrap, { height }]}>
-      <MapLibreGL.MapView style={{ flex: 1 }} mapStyle={styleUrl} logoEnabled={false}
-        attributionEnabled compassEnabled onTouchStart={() => setFollow(false)}>
-        <MapLibreGL.Camera
-          ref={camera}
-          defaultSettings={{
-            centerCoordinate: me || (stops[0] ? [stops[0].lng, stops[0].lat] : [76.93, 8.52]),
-            zoomLevel: 14,
-          }}
-        />
+      <Map style={{ flex: 1 }} mapStyle={styleUrl} logo={false} attribution compass
+        onDidFinishLoadingMap={() => setReady(true)}>
+        <Camera ref={camera}
+          center={me || (stops[0] ? [stops[0].lng, stops[0].lat] : [76.93, 8.52])}
+          zoom={14} />
 
-        {/* The road ahead */}
+        {/* The road ahead, drawn under the pins */}
         {line && (
-          <MapLibreGL.ShapeSource id="route" shape={line}>
-            <MapLibreGL.LineLayer id="route-line"
-              style={{ lineColor: '#1d4ed8', lineWidth: 5, lineOpacity: 0.85, lineCap: 'round', lineJoin: 'round' }} />
-          </MapLibreGL.ShapeSource>
+          <GeoJSONSource id="route" data={line}>
+            <Layer id="route-line" type="line"
+              paint={{ 'line-color': '#1d4ed8', 'line-width': 5, 'line-opacity': 0.85 }}
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }} />
+          </GeoJSONSource>
         )}
 
-        {/* Stops in order — the next one is highlighted so it's obvious */}
-        {stops.map((s, i) => {
-          const isNext = nextStop && s.id === nextStop.id;
-          return (
-            <MapLibreGL.MarkerView key={s.id} id={`stop-${s.id}`} coordinate={[s.lng, s.lat]}>
-              <View style={[styles.stopPin, isNext && styles.stopPinNext]}>
-                <Text style={styles.stopPinText}>{i + 1}</Text>
-              </View>
-            </MapLibreGL.MarkerView>
-          );
-        })}
+        {/* Stops in order — next one green so it's obvious at a glance */}
+        {stops.map((s, i) => (
+          <Marker key={s.id} id={`stop-${s.id}`} lngLat={[s.lng, s.lat]}>
+            <View style={[styles.stopPin, nextStop?.id === s.id && styles.stopPinNext]}>
+              <Text style={styles.stopPinText}>{i + 1}</Text>
+            </View>
+          </Marker>
+        ))}
 
-        {/* The bus: the driver's own phone */}
+        {/* Me. If this dot moves as you drive, GPS is working. */}
         {me && (
-          <MapLibreGL.MarkerView id="me" coordinate={me}>
-            <View style={styles.mePin}><Text style={{ fontSize: 16 }}>🚌</Text></View>
-          </MapLibreGL.MarkerView>
+          <Marker id="me" lngLat={me}>
+            <View style={styles.mePin}><Text style={{ fontSize: 15 }}>🚌</Text></View>
+          </Marker>
         )}
-      </MapLibreGL.MapView>
+      </Map>
 
       <TouchableOpacity style={[styles.followBtn, follow && styles.followOn]} onPress={() => setFollow((f) => !f)}>
         <Text style={[styles.followText, follow && { color: '#fff' }]}>{follow ? '◎ Following' : '◎ Follow me'}</Text>
@@ -104,7 +94,7 @@ const styles = StyleSheet.create({
   stopPinNext: { backgroundColor: '#16a34a', transform: [{ scale: 1.25 }] },
   stopPinText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   mePin: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: '#fff',
+    width: 34, height: 34, borderRadius: 17, backgroundColor: '#fff',
     borderWidth: 2.5, borderColor: '#1d4ed8', alignItems: 'center', justifyContent: 'center',
   },
   followBtn: {

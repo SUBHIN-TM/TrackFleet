@@ -8,10 +8,9 @@ import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import polyline from '@mapbox/polyline';
 import { apiFetch, tokenStore } from './src/api';
-// NOTE: TripMap is intentionally NOT imported — see src/TripMap.jsx. It targets
-// the old MapLibre v9 API and throws at import time on v11, which crashed the
-// app on launch. Re-enable only once it is rewritten for v11 AND tested on a
-// real device.
+// Wrapped in an error boundary: if the native map misbehaves the trip screen
+// must still work (v1.1.0 shipped a map crash that killed the whole app).
+import SafeMap from './src/SafeMap';
 // Importing this registers the background location task (must be module scope).
 import { startTracking, stopTracking, lastFixAt } from './src/locationTask';
 import { checkForUpdate, APP_VERSION } from './src/updateCheck';
@@ -416,6 +415,13 @@ function TripScreen({ tripId, onExit }) {
         <Text style={[styles.gpsBadge, gps === 'on' ? styles.gpsOn : styles.gpsOff]}>{gpsLabel}</Text>
       </View>
 
+      {/* Proof the GPS is alive: the driver's own coordinates, ticking. */}
+      {me && (
+        <Text style={styles.gpsCoords}>
+          📍 {me[1].toFixed(5)}, {me[0].toFixed(5)}{fixAge != null ? ` · sent ${fixAge}s ago` : ''}
+        </Text>
+      )}
+
       {counts && (
         <View style={styles.countRow}>
           <Count n={counts.onboard} label="Onboard" color="#22c55e" />
@@ -426,6 +432,11 @@ function TripScreen({ tripId, onExit }) {
       )}
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 8, paddingBottom: 110 }}>
+        {/* Where I am, the road ahead, and proof the GPS is alive. */}
+        {live?.route?.stops?.length > 0 && (
+          <SafeMap stops={live.route.stops} me={me} routeLine={routeLine} nextStop={nextStop} height={280} />
+        )}
+
         {nextStop && (
           <View style={styles.nextStopBox}>
             <Text style={styles.nextStopLabel}>NEXT STOP</Text>
@@ -570,6 +581,7 @@ const styles = StyleSheet.create({
   tripHeader: { padding: 20, paddingTop: 46, gap: 6 },
   tripTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
   gpsBadge: { fontSize: 12.5, fontWeight: '700' },
+  gpsCoords: { color: '#64748b', fontSize: 11.5, paddingHorizontal: 20, paddingBottom: 6, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   gpsOn: { color: '#22c55e' },
   gpsOff: { color: '#f59e0b' },
   nextStopBox: { backgroundColor: '#14532d', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#16a34a' },
