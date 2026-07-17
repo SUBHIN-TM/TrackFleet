@@ -4,8 +4,9 @@ import {
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Alert, RefreshControl,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import * as Location from 'expo-location';
 import { apiFetch, tokenStore } from './src/api';
+// Importing this registers the background location task (must be module scope).
+import { startTracking, stopTracking, lastFixAt } from './src/locationTask';
 
 // ============================================================================
 // TrackFleet Driver — sign in, see today's runs, start a trip, tick the
@@ -216,10 +217,10 @@ const P_COLOR = { EXPECTED: '#94a3b8', ONBOARD: '#22c55e', DROPPED: '#38bdf8', N
 
 function TripScreen({ tripId, onExit }) {
   const [live, setLive] = useState(null);
-  const [gps, setGps] = useState('starting'); // starting | on | denied | error
+  const [gps, setGps] = useState('starting'); // starting | on | foreground-only | denied | error
+  const [fixAge, setFixAge] = useState(null); // seconds since the last sent fix
   const [busyId, setBusyId] = useState(null);
   const [ending, setEnding] = useState(false);
-  const watcher = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -229,35 +230,21 @@ function TripScreen({ tripId, onExit }) {
   }, [tripId]);
   useEffect(() => { load(); }, [load]);
 
-  // GPS: the phone becomes the bus tracker while this screen is open.
+  // GPS runs as a background task + foreground service, so it KEEPS streaming
+  // when the phone locks or the driver switches apps — a foreground-only
+  // watcher froze the bus on everyone's map the moment the screen went off.
   useEffect(() => {
-    let cancelled = false;
+    let alive = true;
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') { setGps('denied'); return; }
-      try {
-        watcher.current = await Location.watchPositionAsync(
-          // Tight cadence so the bus on everyone's map matches reality — the
-          // web clients interpolate between these fixes for smooth motion.
-          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 8 },
-          (pos) => {
-            if (cancelled) return;
-            setGps('on');
-            apiFetch(`/api/trips/${tripId}/location`, {
-              method: 'POST', auth: true,
-              body: {
-                lat: pos.coords.latitude,
-                lng: pos.coords.longitude,
-                speed: pos.coords.speed != null && pos.coords.speed >= 0 ? pos.coords.speed * 3.6 : undefined, // m/s -> km/h
-                heading: pos.coords.heading ?? undefined,
-                recordedAt: new Date(pos.timestamp).toISOString(),
-              },
-            }).catch(() => {});
-          }
-        );
-      } catch { setGps('error'); }
+      const state = await startTracking(tripId);
+      if (alive) setGps(state);
     })();
-    return () => { cancelled = true; watcher.current?.remove(); };
+    // Show how fresh the last sent fix is, so a stalled GPS is obvious.
+    const t = setInterval(async () => {
+      const at = await lastFixAt();
+      if (alive) setFixAge(at ? Math.round((Date.now() - at) / 1000) : null);
+    }, 2000);
+    return () => { alive = false; clearInterval(t); };
   }, [tripId]);
 
   async function mark(passengerId, status) {
@@ -288,13 +275,22 @@ function TripScreen({ tripId, onExit }) {
     setEnding(true);
     try {
       await apiFetch(`/api/trips/${tripId}/end`, { method: 'POST', auth: true });
+      await stopTracking(); // release GPS + drop the foreground notification
       onExit();
     } catch (err) { Alert.alert('Couldn’t end trip', err.message); }
     finally { setEnding(false); }
   }
 
   const counts = live?.trip?.counts;
-  const gpsLabel = { starting: '⏳ GPS starting…', on: '🟢 GPS live', denied: '🔴 GPS permission denied — enable location for live tracking', error: '🔴 GPS unavailable' }[gps];
+  const gpsLabel = {
+    starting: '⏳ GPS starting…',
+    on: fixAge == null ? '🟢 GPS live — keeps running with the screen off'
+      : fixAge < 30 ? `🟢 GPS live · sent ${fixAge}s ago`
+      : `🟠 last fix ${fixAge}s ago — check signal`,
+    'foreground-only': '🟠 Background location OFF — tracking stops when the screen locks. Allow “Always” in settings.',
+    denied: '🔴 GPS permission denied — parents cannot see the bus',
+    error: '🔴 GPS unavailable',
+  }[gps];
 
   return (
     <SafeAreaView style={styles.screen}>

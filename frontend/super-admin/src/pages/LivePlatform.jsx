@@ -154,27 +154,19 @@ export default function LivePlatform() {
           {live && (
             <Stack spacing={2}>
               {(styleUrl || tileUrl) && (
-                <Box sx={{ position: 'relative' }}>
-                  <PlatformMap
-                    tileUrlTemplate={tileUrl}
-                    styleUrl={styleUrl}
-                    stops={(live.route?.stops || []).map((s) => ({ lat: s.lat, lng: s.lng, name: s.name }))}
-                    trail={live.trail || []}
-                    vehicle={lastLoc ? [lastLoc.lng, lastLoc.lat] : null}
-                    followVehicle={follow}
-                    fitKey={1}
-                    height={320}
-                    center={lastLoc ? [lastLoc.lng, lastLoc.lat]
-                      : live.route?.stops?.[0] ? [live.route.stops[0].lng, live.route.stops[0].lat] : [76.93, 8.52]}
-                  />
-                  <Tooltip title={follow ? 'Following the bus — click to stop' : 'Click to follow the bus'} arrow>
-                    <IconButton size="small" onClick={() => setFollow((f) => !f)}
-                      sx={{ position: 'absolute', bottom: 12, right: 12, bgcolor: follow ? 'primary.main' : '#fff',
-                        color: follow ? '#fff' : 'text.secondary', boxShadow: 2, '&:hover': { bgcolor: follow ? 'primary.dark' : '#f4f4f8' } }}>
-                      <MyLocationRoundedIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
+                <PlatformMap
+                  tileUrlTemplate={tileUrl}
+                  styleUrl={styleUrl}
+                  stops={(live.route?.stops || []).map((s) => ({ lat: s.lat, lng: s.lng, name: s.name }))}
+                  trail={live.trail || []}
+                  vehicle={lastLoc ? [lastLoc.lng, lastLoc.lat] : null}
+                  followVehicle={follow}
+                  onToggleFollow={() => setFollow((f) => !f)}
+                  fitKey={1}
+                  height={360}
+                  center={lastLoc ? [lastLoc.lng, lastLoc.lat]
+                    : live.route?.stops?.[0] ? [live.route.stops[0].lng, live.route.stops[0].lat] : [76.93, 8.52]}
+                />
               )}
               {lastLoc ? (
                 <Typography variant="caption" color="text.secondary">

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -62,8 +62,11 @@ export default function PlatformMap({
   vehicle,              // [lng, lat] — live bus position (animated marker)
   trail = [],           // [[lng,lat], ...] — the path travelled so far
   followVehicle = false, // keep the camera on the bus as it moves
+  onToggleFollow,       // provide to show the follow button in the control stack
 }) {
   const ref = useRef(null);
+  const wrapRef = useRef(null);
+  const [isFs, setIsFs] = useState(false);
   const mapRef = useRef(null);
   const markers = useRef([]);
   const searchMarker = useRef(null);
@@ -92,6 +95,8 @@ export default function PlatformMap({
     mapRef.current = map;
     // visualizePitch shows the compass tilt; the compass also rotates on drag.
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+    // Fullscreen the WRAPPER (not the canvas) so our own controls come along.
+    map.addControl(new maplibregl.FullscreenControl({ container: wrapRef.current }), 'top-right');
     // "Locate me" — centers on the user's GPS position for easy route building.
     map.addControl(
       new maplibregl.GeolocateControl({
@@ -106,6 +111,17 @@ export default function PlatformMap({
     return () => { map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [styleUrl, tileUrlTemplate]);
+
+  // Track fullscreen so the map can fill the screen (and resize to match).
+  useEffect(() => {
+    const onFs = () => {
+      const fs = document.fullscreenElement === wrapRef.current;
+      setIsFs(fs);
+      setTimeout(() => mapRef.current?.resize(), 60);
+    };
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
 
   // stop markers
   useEffect(() => {
@@ -236,12 +252,29 @@ export default function PlatformMap({
     background: '#fff', border: '1px solid #e0e0ea', borderRadius: 9, fontSize: 16,
     color: '#3a3a52', boxShadow: '0 2px 8px rgba(0,0,0,.12)', lineHeight: 1, userSelect: 'none',
   };
+  const btnOn = { background: '#2563eb', borderColor: '#2563eb', color: '#fff' };
 
   return (
-    <div style={{ position: 'relative' }}>
-      <div ref={ref} style={{ height, borderRadius: 12, overflow: 'hidden', border: '1px solid #e6e6ef' }} />
-      {/* Map rotation / tilt controls — turn the map so the road is easy to click. */}
+    // The wrapper is what goes fullscreen, so our controls stay visible there.
+    <div ref={wrapRef} style={{ position: 'relative', background: '#fff', height: isFs ? '100%' : undefined }}>
+      <div ref={ref} style={{
+        height: isFs ? '100%' : height,
+        borderRadius: isFs ? 0 : 12,
+        overflow: 'hidden',
+        border: isFs ? 'none' : '1px solid #e6e6ef',
+      }} />
+      {/* Controls live top-left: bottom-right is MapLibre's attribution (ⓘ). */}
       <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 5 }}>
+        {onToggleFollow && (
+          <button type="button" onClick={onToggleFollow}
+            style={{ ...btn, ...(followVehicle ? btnOn : {}) }}
+            title={followVehicle ? 'Following the bus — click to stop' : 'Follow the bus'}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="3.2" /><circle cx="12" cy="12" r="8" opacity=".45" />
+              <path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" />
+            </svg>
+          </button>
+        )}
         <button type="button" style={btn} title="Rotate left" onClick={() => rotate(-30)}>⟲</button>
         <button type="button" style={btn} title="Rotate right" onClick={() => rotate(30)}>⟳</button>
         <button type="button" style={btn} title="Tilt" onClick={() => tilt(20)}>⛰</button>

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -54,6 +54,8 @@ export default function LiveMap({
   height = 260,
 }) {
   const ref = useRef(null);
+  const wrapRef = useRef(null);
+  const [isFs, setIsFs] = useState(false);
   const mapRef = useRef(null);
   const stopMarker = useRef(null);
   const busMarker = useRef(null);
@@ -70,10 +72,22 @@ export default function LiveMap({
     const center = vehicle || (stop ? [stop.lng, stop.lat] : [76.93, 8.52]);
     const map = new maplibregl.Map({ container: ref.current, style, center, zoom: 14 });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+    // Tap to enlarge — parents want the big view while the bus is close.
+    map.addControl(new maplibregl.FullscreenControl({ container: wrapRef.current }), 'top-right');
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [styleUrl, tileUrlTemplate]);
+
+  // Fill the screen (and resize the canvas) when fullscreen toggles.
+  useEffect(() => {
+    const onFs = () => {
+      setIsFs(document.fullscreenElement === wrapRef.current);
+      setTimeout(() => mapRef.current?.resize(), 60);
+    };
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
 
   // child's stop pin
   useEffect(() => {
@@ -148,5 +162,14 @@ export default function LiveMap({
     if (map.isStyleLoaded()) draw(); else map.once('load', draw);
   }, [trail]);
 
-  return <div ref={ref} style={{ height, borderRadius: 14, overflow: 'hidden', border: '1px solid #e6e6ef' }} />;
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', background: '#fff', height: isFs ? '100%' : undefined }}>
+      <div ref={ref} style={{
+        height: isFs ? '100%' : height,
+        borderRadius: isFs ? 0 : 14,
+        overflow: 'hidden',
+        border: isFs ? 'none' : '1px solid #e6e6ef',
+      }} />
+    </div>
+  );
 }

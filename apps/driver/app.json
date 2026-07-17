@@ -2,7 +2,7 @@
   "expo": {
     "name": "TrackFleet Driver",
     "slug": "trackfleet-driver",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": [
@@ -14,13 +14,23 @@
     },
     "android": {
       "package": "com.trackfleet.driver",
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "WAKE_LOCK"
+      ]
     },
     "plugins": [
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "TrackFleet uses your location while a trip is running so the organization and parents can see where the bus is."
+          "locationWhenInUsePermission": "TrackFleet uses your location while a trip is running so the organization and parents can see where the bus is.",
+          "locationAlwaysAndWhenInUsePermission": "TrackFleet shares the bus location during a trip even when your screen is off, so parents can follow the bus the whole way.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ]
     ]
