@@ -100,17 +100,18 @@ export default function TripMap({ stops = [], me, routeLine = [], nextStop, heig
 
       {/* Buttons, because pinch-zoom on a moving bus with one hand is hopeless */}
       <View style={styles.zoomCol}>
+        {/* ASCII + and -, not ＋/−: fancy glyphs depend on the device font. */}
         <TouchableOpacity style={[styles.mapBtn, styles.mapBtnTop]} onPress={() => zoomBy(1)}>
-          <Text style={styles.mapBtnText}>＋</Text>
+          <Text style={styles.mapBtnText}>+</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.mapBtn} onPress={() => zoomBy(-1)}>
-          <Text style={styles.mapBtnText}>−</Text>
+          <Text style={styles.mapBtnText}>-</Text>
         </TouchableOpacity>
       </View>
 
       <TouchableOpacity style={[styles.followBtn, follow && styles.followOn]} onPress={recenter}>
         <Text style={[styles.followText, follow && { color: '#fff' }]}>
-          {follow ? '◎ Following' : '◎ Centre on me'}
+          {follow ? 'Following you' : 'Centre on me'}
         </Text>
       </TouchableOpacity>
     </View>
@@ -139,6 +140,7 @@ const styles = StyleSheet.create({
   followBtn: {
     position: 'absolute', bottom: 10, right: 10, backgroundColor: '#fff',
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
   },
   followOn: { backgroundColor: '#2563eb' },
   followText: { fontSize: 12, fontWeight: '800', color: '#334155' },

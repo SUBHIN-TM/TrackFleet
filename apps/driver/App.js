@@ -178,7 +178,7 @@ function Home({ user, onLogout, onOpenTrip }) {
         <TouchableOpacity onPress={checkNow} disabled={checking} style={styles.headBtn}>
           {checking
             ? <ActivityIndicator size="small" color="#60a5fa" />
-            : <Text style={styles.linkText}>{update.available ? '↑ Update' : '⟳ Update'}</Text>}
+            : <Text style={styles.linkText}>{update.available ? 'Update!' : 'Update'}</Text>}
         </TouchableOpacity>
         <TouchableOpacity onPress={onLogout} style={styles.headBtn}>
           <Text style={styles.linkText}>Log out</Text>
@@ -195,7 +195,7 @@ function Home({ user, onLogout, onOpenTrip }) {
             {!!update.notes && <Text style={styles.updateNotes}>{update.notes}</Text>}
             <Text style={styles.updateNotes}>You’re on v{APP_VERSION}. Downloading installs over this app — your login stays.</Text>
             <TouchableOpacity style={styles.updateBtn} onPress={() => Linking.openURL(update.apkUrl)}>
-              <Text style={styles.primaryBtnText}>⬇ Download update</Text>
+              <Text style={styles.primaryBtnText}>Download update</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -211,7 +211,7 @@ function Home({ user, onLogout, onOpenTrip }) {
             </View>
             {checking
               ? <ActivityIndicator size="small" color="#60a5fa" />
-              : <Text style={styles.versionCardIcon}>⟳</Text>}
+              : <Text style={styles.versionCardIcon}>{'>'}</Text>}
           </TouchableOpacity>
         )}
 
@@ -246,7 +246,7 @@ function Home({ user, onLogout, onOpenTrip }) {
               )}
               {live ? (
                 <TouchableOpacity style={styles.primaryBtn} onPress={() => onOpenTrip(t.id)}>
-                  <Text style={styles.primaryBtnText}>Continue trip →</Text>
+                  <Text style={styles.primaryBtnText}>Continue trip</Text>
                 </TouchableOpacity>
               ) : done ? (
                 <View style={[styles.primaryBtn, styles.btnGhost]}>
@@ -257,7 +257,9 @@ function Home({ user, onLogout, onOpenTrip }) {
                   disabled={startingId === s.id}
                   onPress={() => Alert.alert('Start trip?', `${s.name} — ${s.route?.name}. Parents will be notified and live tracking begins.`,
                     [{ text: 'Cancel', style: 'cancel' }, { text: 'Start', onPress: () => startTrip(s) }])}>
-                  {startingId === s.id ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>▶ Start trip</Text>}
+                  {startingId === s.id
+                    ? <ActivityIndicator color="#fff" />
+                    : <Text style={styles.primaryBtnText}>Start trip</Text>}
                 </TouchableOpacity>
               )}
             </View>
@@ -270,7 +272,7 @@ function Home({ user, onLogout, onOpenTrip }) {
             <ActivityIndicator size="small" color="#60a5fa" />
           ) : (
             <Text style={styles.versionText}>
-              TrackFleet Driver v{APP_VERSION} · {update.available ? 'Update available ↑' : 'Tap to check for updates'}
+              TrackFleet Driver v{APP_VERSION} · {update.available ? 'Update available' : 'Tap to check for updates'}
             </Text>
           )}
         </TouchableOpacity>
@@ -458,7 +460,11 @@ function TripScreen({ tripId, onExit }) {
     <SafeAreaView style={styles.screen}>
       <StatusBar style="light" />
       <View style={styles.tripHeader}>
-        <TouchableOpacity onPress={onExit}><Text style={styles.linkText}>← Runs</Text></TouchableOpacity>
+        {/* Plain text only: a "←" here rendered as "IJ" on a real phone, because
+            the glyph is missing from that device's font. ASCII always renders. */}
+        <TouchableOpacity onPress={onExit} style={styles.backBtn}>
+          <Text style={styles.linkText}>{'<  Back to runs'}</Text>
+        </TouchableOpacity>
         <Text style={styles.tripTitle}>{live?.trip?.scheduleName || 'Trip'}</Text>
         <Text style={[styles.gpsBadge, gps === 'on' ? styles.gpsOn : styles.gpsOff]}>{gpsLabel}</Text>
       </View>
@@ -484,7 +490,7 @@ function TripScreen({ tripId, onExit }) {
         <TouchableOpacity style={styles.syncBtn} onPress={syncNow} disabled={syncing}>
           {syncing
             ? <ActivityIndicator size="small" color="#60a5fa" />
-            : <Text style={styles.syncText}>⟳ Sync position</Text>}
+            : <Text style={styles.syncText}>Sync position</Text>}
         </TouchableOpacity>
       </View>
 
@@ -566,7 +572,9 @@ function TripScreen({ tripId, onExit }) {
 
       <View style={styles.footer}>
         <TouchableOpacity style={[styles.endBtn, ending && styles.btnDisabled]} onPress={confirmEnd} disabled={ending}>
-          {ending ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>■ End trip</Text>}
+          {ending
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.primaryBtnText}>End trip</Text>}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -630,6 +638,9 @@ const styles = StyleSheet.create({
   versionRow: { paddingVertical: 16, alignItems: 'center' },
   versionText: { color: '#64748b', fontSize: 12.5, fontWeight: '600' },
   headBtn: { paddingHorizontal: 8, paddingVertical: 6 },
+  headBtnRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  btnRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, alignSelf: 'flex-start' },
   versionCard: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b',
     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 16,
