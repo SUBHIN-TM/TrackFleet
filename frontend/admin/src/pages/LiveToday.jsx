@@ -9,6 +9,7 @@ import DirectionsBusRoundedIcon from '@mui/icons-material/DirectionsBusRounded';
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import MyLocationRoundedIcon from '@mui/icons-material/MyLocationRounded';
 import StopCircleRoundedIcon from '@mui/icons-material/StopCircleRounded';
+import SensorsRoundedIcon from '@mui/icons-material/SensorsRounded';
 import { api } from '../lib/api.js';
 import PageHeader from '../components/PageHeader.jsx';
 import PlatformMap from '../components/PlatformMap.jsx';
@@ -32,6 +33,33 @@ const P_STATUS = {
 };
 const timeOf = (d) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
 const vehicleLabel = (v) => (v ? `${v.fleetNo ? v.fleetNo + ' · ' : ''}${v.regNumber}` : '—');
+const ageText = (s) => (s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`);
+
+// Is the bus actually reporting? A trip can be "running" while the driver's
+// phone has stopped sending — the admin must be able to see that difference,
+// otherwise a frozen bus looks the same as a parked one.
+function gpsHealth(lastLocation) {
+  if (!lastLocation) {
+    return {
+      label: 'No GPS', color: 'error',
+      help: 'The driver’s phone hasn’t sent any position yet. Ask them to open the app and allow location “All the time”.',
+    };
+  }
+  const age = Math.round((Date.now() - new Date(lastLocation.recordedAt)) / 1000);
+  if (age <= 45) {
+    return { label: `GPS live · ${ageText(age)}`, color: 'success', help: 'The bus is reporting normally.' };
+  }
+  if (age <= 180) {
+    return {
+      label: `GPS delayed · ${ageText(age)}`, color: 'warning',
+      help: 'No fix for a while — usually a weak mobile signal. It should catch up on its own.',
+    };
+  }
+  return {
+    label: `GPS lost · ${ageText(age)}`, color: 'error',
+    help: 'The phone stopped sending. The app may be closed, location turned off, or the battery dead. Call the driver.',
+  };
+}
 
 export default function LiveToday() {
   const [runs, setRuns] = useState(null);
@@ -144,6 +172,16 @@ export default function LiveToday() {
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap mb={1.2}>
                     <Chip size="small" variant="outlined" label={`${r.schedule.direction === 'DROP' ? 'Drop' : r.schedule.direction === 'BOTH' ? 'Both' : 'Pickup'} · ${r.schedule.startTime}`} />
                     <Chip size="small" variant="outlined" icon={<DirectionsBusRoundedIcon sx={{ fontSize: 15 }} />} label={vehicleLabel(r.vehicle)} />
+                    {/* Is the bus actually reporting? Not the same as "running". */}
+                    {isLive && (() => {
+                      const g = gpsHealth(r.trip.lastLocation);
+                      return (
+                        <Tooltip title={g.help} arrow>
+                          <Chip size="small" color={g.color} icon={<SensorsRoundedIcon sx={{ fontSize: 15 }} />}
+                            label={g.label} sx={{ fontWeight: 700 }} />
+                        </Tooltip>
+                      );
+                    })()}
                   </Stack>
                   <Typography variant="caption" color="text.secondary" display="block">
                     Driver: <b>{r.driver?.name}</b>{r.driver?.phone ? ` · ${r.driver.phone}` : ''}
@@ -214,12 +252,21 @@ export default function LiveToday() {
                     : live.route?.stops?.[0] ? [live.route.stops[0].lng, live.route.stops[0].lat] : [76.93, 8.52]}
                 />
               )}
-              {lastLoc ? (
+              {/* GPS health, stated plainly — a stalled feed must never look normal. */}
+              {viewIsLive && (() => {
+                const g = gpsHealth(lastLoc);
+                return (
+                  <Alert severity={g.color === 'success' ? 'success' : g.color === 'warning' ? 'warning' : 'error'}
+                    icon={<SensorsRoundedIcon fontSize="inherit" />} sx={{ py: 0.5 }}>
+                    <b>{g.label}</b>
+                    {lastLoc?.speed != null ? ` · ${Math.round(lastLoc.speed)} km/h` : ''} — {g.help}
+                  </Alert>
+                );
+              })()}
+              {!viewIsLive && lastLoc && (
                 <Typography variant="caption" color="text.secondary">
-                  Last GPS fix {timeOf(lastLoc.recordedAt)}{lastLoc.speed != null ? ` · ${Math.round(lastLoc.speed)} km/h` : ''} — updates every 5s.
+                  Last GPS fix {timeOf(lastLoc.recordedAt)} · trip finished.
                 </Typography>
-              ) : (
-                <Alert severity="info" sx={{ py: 0.5 }}>No GPS received yet — the bus appears the moment the driver's phone sends its first fix.</Alert>
               )}
 
               <Table size="small">

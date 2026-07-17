@@ -396,11 +396,15 @@ function TripScreen({ tripId, onExit }) {
     ? live.passengers.filter((p) => p.stopSequence === nextStop.sequence && p.status === 'EXPECTED').length
     : 0;
 
+  // Only claim "live" once a fix has actually reached the server. Saying
+  // "GPS live" merely because tracking started was a lie: the driver saw green
+  // while the admin saw no bus at all.
   const gpsLabel = {
     starting: '⏳ GPS starting…',
-    on: fixAge == null ? '🟢 GPS live — keeps running with the screen off'
+    on: fixAge == null ? '⏳ Waiting for first GPS fix…'
       : fixAge < 30 ? `🟢 GPS live · sent ${fixAge}s ago`
-      : `🟠 last fix ${fixAge}s ago — check signal`,
+      : fixAge < 120 ? `🟠 last fix ${fixAge}s ago — weak signal`
+      : `🔴 no fix for ${Math.round(fixAge / 60)}m — check location is on`,
     'foreground-only': '🟠 Background location OFF — tracking stops when the screen locks. Allow “Always” in settings.',
     denied: '🔴 GPS permission denied — parents cannot see the bus',
     error: '🔴 GPS unavailable',

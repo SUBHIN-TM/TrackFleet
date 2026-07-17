@@ -27,6 +27,27 @@ export const lastFixAt = async () => {
 
 const SEEN_KEY = 'tf_last_fix_ts'; // newest fix already sent, to kill duplicates
 
+// One place that knows how to send a fix, used by both the immediate
+// start-of-trip position and the background stream.
+async function postFix(tripId, loc) {
+  await apiFetch(`/api/trips/${tripId}/location`, {
+    method: 'POST',
+    auth: true,
+    body: {
+      lat: loc.coords.latitude,
+      lng: loc.coords.longitude,
+      // m/s -> km/h; negative means "unknown" on Android.
+      speed: loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed * 3.6 : undefined,
+      heading: loc.coords.heading >= 0 ? loc.coords.heading : undefined,
+      recordedAt: new Date(loc.timestamp).toISOString(),
+    },
+  });
+  await AsyncStorage.multiSet([
+    [SEEN_KEY, String(loc.timestamp)],
+    [LAST_KEY, String(Date.now())],
+  ]);
+}
+
 TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   if (error) return;
   const tripId = await AsyncStorage.getItem(TRIP_KEY);
@@ -42,22 +63,7 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 
   for (const loc of fresh) {
     try {
-      await apiFetch(`/api/trips/${tripId}/location`, {
-        method: 'POST',
-        auth: true,
-        body: {
-          lat: loc.coords.latitude,
-          lng: loc.coords.longitude,
-          // m/s -> km/h; negative means "unknown" on Android.
-          speed: loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed * 3.6 : undefined,
-          heading: loc.coords.heading >= 0 ? loc.coords.heading : undefined,
-          recordedAt: new Date(loc.timestamp).toISOString(),
-        },
-      });
-      await AsyncStorage.multiSet([
-        [SEEN_KEY, String(loc.timestamp)],
-        [LAST_KEY, String(Date.now())],
-      ]);
+      await postFix(tripId, loc);
     } catch {
       // Offline or server blip — stop this batch and keep the marker where it
       // is, so the next batch retries from here instead of skipping ahead.
@@ -74,16 +80,29 @@ export async function startTracking(tripId) {
   const bg = await Location.requestBackgroundPermissionsAsync();
 
   await setActiveTrip(tripId);
+
+  // Put the bus on everyone's map NOW. Android only delivers a location once
+  // the phone has MOVED, so a driver who starts while parked used to send
+  // nothing at all — the admin saw "No GPS" and no bus icon, even though the
+  // phone was fine.
+  try {
+    const first = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
+    await postFix(tripId, first);
+  } catch {
+    // No fix yet (indoors/cold start) — the stream below will catch up.
+  }
+
   try {
     const already = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK);
     if (already) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
 
     await Location.startLocationUpdatesAsync(LOCATION_TASK, {
       accuracy: Location.Accuracy.BestForNavigation,
-      // Every move counts: report each metre, at most every 2s. A 10m filter
-      // made short trips look like the bus never moved.
-      timeInterval: 2000,
-      distanceInterval: 1,
+      // distanceInterval 0 = report on every tick even when stationary. A
+      // distance filter silences a parked bus, which is indistinguishable from
+      // a broken one: admins need a heartbeat to trust the tracking.
+      timeInterval: 3000,
+      distanceInterval: 0,
       pausesUpdatesAutomatically: false, // iOS would otherwise pause when "still"
       showsBackgroundLocationIndicator: true,
       foregroundService: {
