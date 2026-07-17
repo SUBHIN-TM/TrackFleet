@@ -2,7 +2,7 @@
   "expo": {
     "name": "TrackFleet Driver",
     "slug": "trackfleet-driver",
-    "version": "1.0.5",
+    "version": "1.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": [
@@ -32,7 +32,8 @@
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
-      ]
+      ],
+      "@maplibre/maplibre-react-native"
     ]
   }
 }

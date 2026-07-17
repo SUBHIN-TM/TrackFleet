@@ -5,7 +5,10 @@ import {
   Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Location from 'expo-location';
+import polyline from '@mapbox/polyline';
 import { apiFetch, tokenStore } from './src/api';
+import TripMap from './src/TripMap';
 // Importing this registers the background location task (must be module scope).
 import { startTracking, stopTracking, lastFixAt } from './src/locationTask';
 import { checkForUpdate, APP_VERSION } from './src/updateCheck';
@@ -287,13 +290,48 @@ function TripScreen({ tripId, onExit }) {
   const [busyId, setBusyId] = useState(null);
   const [ending, setEnding] = useState(false);
 
+  const [me, setMe] = useState(null);          // driver's own position, for the map
+  const [routeLine, setRouteLine] = useState([]);
+
   const load = useCallback(async () => {
     try {
       const data = await apiFetch(`/api/trips/${tripId}/live`, { auth: true });
       setLive(data);
     } catch { /* keep last */ }
   }, [tripId]);
-  useEffect(() => { load(); }, [load]);
+  // Poll so the checklist and counts stay right if the admin changes something.
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 8000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  // Our own dot on the map: read the cached fix rather than open a second GPS
+  // session — the background task is already the one burning the radio.
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const p = await Location.getLastKnownPositionAsync();
+        if (alive && p) setMe([p.coords.longitude, p.coords.latitude]);
+      } catch { /* no fix yet */ }
+    };
+    tick();
+    const t = setInterval(tick, 3000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  // Road-snapped path through the stops — fetched once; stops don't move.
+  useEffect(() => {
+    const stops = live?.route?.stops || [];
+    if (stops.length < 2 || routeLine.length) return;
+    apiFetch('/api/map/route', {
+      method: 'POST', auth: true,
+      body: { waypoints: stops.map((s) => ({ lat: s.lat, lng: s.lng })) },
+    })
+      .then((r) => setRouteLine(polyline.decode(r.geometry).map(([lat, lng]) => [lng, lat])))
+      .catch(() => { /* routing down — the map still shows stops + position */ });
+  }, [live?.route?.stops?.length]);
 
   // GPS runs as a background task + foreground service, so it KEEPS streaming
   // when the phone locks or the driver switches apps — a foreground-only
@@ -347,6 +385,15 @@ function TripScreen({ tripId, onExit }) {
   }
 
   const counts = live?.trip?.counts;
+  // "Next" = the earliest stop that still has someone waiting — what the driver
+  // is actually driving towards.
+  const nextStop = live?.route?.stops?.find((s) =>
+    live.passengers?.some((p) => p.stopSequence === s.sequence && p.status === 'EXPECTED')
+  ) || null;
+  const waitingAtNext = nextStop
+    ? live.passengers.filter((p) => p.stopSequence === nextStop.sequence && p.status === 'EXPECTED').length
+    : 0;
+
   const gpsLabel = {
     starting: '⏳ GPS starting…',
     on: fixAge == null ? '🟢 GPS live — keeps running with the screen off'
@@ -376,6 +423,26 @@ function TripScreen({ tripId, onExit }) {
       )}
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 8, paddingBottom: 110 }}>
+        {/* The road ahead: where I am, the route, and which stop is next. */}
+        {live?.route?.stops?.length > 0 && (
+          <TripMap
+            stops={live.route.stops}
+            me={me}
+            routeLine={routeLine}
+            nextStop={nextStop}
+            height={260}
+          />
+        )}
+        {nextStop && (
+          <View style={styles.nextStopBox}>
+            <Text style={styles.nextStopLabel}>NEXT STOP</Text>
+            <Text style={styles.nextStopName}>{nextStop.sequence}. {nextStop.name}</Text>
+            <Text style={styles.nextStopSub}>
+              {waitingAtNext} passenger{waitingAtNext === 1 ? '' : 's'} waiting here
+            </Text>
+          </View>
+        )}
+
         <Text style={styles.sectionTitle}>PASSENGERS{live?.route?.name ? ` — ${live.route.name}` : ''}</Text>
         {!live && <ActivityIndicator color="#3b82f6" style={{ marginTop: 30 }} />}
         {live?.passengers?.map((p) => (
@@ -512,6 +579,10 @@ const styles = StyleSheet.create({
   gpsBadge: { fontSize: 12.5, fontWeight: '700' },
   gpsOn: { color: '#22c55e' },
   gpsOff: { color: '#f59e0b' },
+  nextStopBox: { backgroundColor: '#14532d', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#16a34a' },
+  nextStopLabel: { color: '#86efac', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  nextStopName: { color: '#fff', fontSize: 18, fontWeight: '800', marginTop: 2 },
+  nextStopSub: { color: '#bbf7d0', fontSize: 12.5, marginTop: 2 },
   countRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 10, marginBottom: 6 },
   countBox: { flex: 1, backgroundColor: '#1e293b', borderRadius: 12, paddingVertical: 10, alignItems: 'center' },
   countN: { fontSize: 20, fontWeight: '800' },
