@@ -171,7 +171,9 @@ export default function PlatformMap({
     if (!vehicleMarker.current) {
       vehicleMarker.current = new maplibregl.Marker({ element: buildVehicleEl() }).setLngLat(vehicle).addTo(map);
       prevPos.current = vehicle;
-      if (followVehicle) map.easeTo({ center: vehicle, duration: 600 });
+      // Street-level on the first fix. Fitted to the whole route, a few hundred
+      // metres of driving is a couple of pixels and reads as "not moving".
+      if (followVehicle) map.easeTo({ center: vehicle, zoom: Math.max(map.getZoom(), 16), duration: 700 });
       return;
     }
 
@@ -232,10 +234,12 @@ export default function PlatformMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyKey]);
 
-  // refit view to stops when asked
+  // refit view to stops when asked — but never fight the live bus for the
+  // camera: if we're following it, its own zoom/centre wins.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || fitKey === undefined || stops.length === 0) return;
+    if (vehicle && followVehicle) return;
     if (stops.length === 1) { map.flyTo({ center: [stops[0].lng, stops[0].lat], zoom: 14 }); return; }
     const b = new maplibregl.LngLatBounds();
     stops.forEach((s) => b.extend([s.lng, s.lat]));

@@ -116,7 +116,8 @@ export default function LiveMap({
     if (!busMarker.current) {
       busMarker.current = new maplibregl.Marker({ element: buildVehicleEl() }).setLngLat(vehicle).addTo(map);
       prevPos.current = vehicle;
-      map.easeTo({ center: vehicle, duration: 600 });
+      // Street-level on the first fix, so small movements are actually visible.
+      map.easeTo({ center: vehicle, zoom: Math.max(map.getZoom(), 16), duration: 700 });
       return;
     }
 

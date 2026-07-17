@@ -25,12 +25,22 @@ export const lastFixAt = async () => {
   return v ? Number(v) : null;
 };
 
+const SEEN_KEY = 'tf_last_fix_ts'; // newest fix already sent, to kill duplicates
+
 TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   if (error) return;
   const tripId = await AsyncStorage.getItem(TRIP_KEY);
   if (!tripId) return; // trip ended — nothing to report
 
-  for (const loc of data?.locations || []) {
+  // Android hands us batches that can overlap, so the same fix arrived several
+  // times and cluttered the trail. Only send fixes newer than the last sent.
+  const seen = Number(await AsyncStorage.getItem(SEEN_KEY)) || 0;
+  const fresh = (data?.locations || [])
+    .filter((l) => l.timestamp > seen)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  if (!fresh.length) return;
+
+  for (const loc of fresh) {
     try {
       await apiFetch(`/api/trips/${tripId}/location`, {
         method: 'POST',
@@ -44,10 +54,14 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
           recordedAt: new Date(loc.timestamp).toISOString(),
         },
       });
-      await AsyncStorage.setItem(LAST_KEY, String(Date.now()));
+      await AsyncStorage.multiSet([
+        [SEEN_KEY, String(loc.timestamp)],
+        [LAST_KEY, String(Date.now())],
+      ]);
     } catch {
-      // Offline or server blip — drop this fix rather than crash the task.
-      // The next fix (seconds away) carries the current position anyway.
+      // Offline or server blip — stop this batch and keep the marker where it
+      // is, so the next batch retries from here instead of skipping ahead.
+      break;
     }
   }
 });
@@ -66,8 +80,10 @@ export async function startTracking(tripId) {
 
     await Location.startLocationUpdatesAsync(LOCATION_TASK, {
       accuracy: Location.Accuracy.BestForNavigation,
-      timeInterval: 4000,
-      distanceInterval: 10,
+      // Every move counts: report each metre, at most every 2s. A 10m filter
+      // made short trips look like the bus never moved.
+      timeInterval: 2000,
+      distanceInterval: 1,
       pausesUpdatesAutomatically: false, // iOS would otherwise pause when "still"
       showsBackgroundLocationIndicator: true,
       foregroundService: {
