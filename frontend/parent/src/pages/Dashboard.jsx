@@ -54,13 +54,18 @@ export default function Dashboard() {
   }, []);
 
   const anyLive = children?.some((c) => c.trip?.live);
+  const anyUpcoming = children?.some((c) => !c.trip && c.upcoming?.length > 0);
 
   return (
     <Box>
       <Typography variant="h4" mb={0.5}>Hi{user?.name ? `, ${user.name}` : ''} 👋</Typography>
       <Typography color="text.secondary" mb={3}>
         {user?.tenantName ? `${user.tenantName} · ` : ''}
-        {anyLive ? 'A bus is on the move — following it live.' : 'Here’s who you’re following.'}
+        {anyLive
+          ? 'A bus is on the move — following it live.'
+          : anyUpcoming
+            ? 'Today’s rides are scheduled — tracking begins when the bus starts.'
+            : 'Here’s who you’re following.'}
       </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -104,15 +109,47 @@ export default function Dashboard() {
 
                 <Divider sx={{ my: 1.5 }} />
 
-                {/* No trip today: show the standing details */}
+                {/* No live trip: show today's upcoming runs + standing details */}
                 {!t && (
-                  <Stack spacing={1}>
+                  <Stack spacing={1.2}>
+                    {c.route && <Info icon={<RouteRoundedIcon fontSize="small" />} label="Route" value={c.route.name} />}
                     {c.stop
                       ? <Info icon={<PlaceRoundedIcon fontSize="small" />} label="Stop" value={c.stop.name} />
                       : <Typography variant="body2" color="text.secondary">No stop assigned yet.</Typography>}
-                    <Typography variant="caption" color="text.secondary">
-                      No trip yet today — this card comes alive the moment the bus starts.
-                    </Typography>
+
+                    {c.upcoming?.length > 0 ? (
+                      <Box sx={{ bgcolor: 'primary.light', borderRadius: 2.5, p: 1.5, mt: 0.5 }}>
+                        <Typography variant="subtitle2" color="primary.dark" mb={0.8}>
+                          Coming up today
+                        </Typography>
+                        <Stack spacing={1}>
+                          {c.upcoming.map((u) => (
+                            <Box key={u.id}>
+                              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                <Chip size="small" color="primary" icon={<ScheduleRoundedIcon sx={{ fontSize: 15 }} />}
+                                  label={u.startTime} sx={{ fontWeight: 800 }} />
+                                <Typography variant="body2" fontWeight={700}>
+                                  {u.direction === 'DROP' ? 'Drop' : 'Pickup'}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">{u.name}</Typography>
+                              </Stack>
+                              <Typography variant="caption" color="text.secondary" display="block" mt={0.3}>
+                                🚌 {u.vehicle?.fleetNo ? u.vehicle.fleetNo + ' · ' : ''}{u.vehicle?.regNumber || 'Bus'}
+                                {u.driver?.name ? ` · Driver ${u.driver.name}` : ''}
+                                {u.driver?.phone ? ` · ${u.driver.phone}` : ''}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" display="block" mt={1}>
+                          Live tracking starts the moment the driver begins the trip.
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Typography variant="caption" color="text.secondary">
+                        {c.route ? 'No more runs scheduled for today.' : 'Not assigned to a route yet — your organization will set this up.'}
+                      </Typography>
+                    )}
                   </Stack>
                 )}
 

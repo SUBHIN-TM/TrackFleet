@@ -354,9 +354,17 @@ router.get(
   asyncHandler(async (req, res) => {
     const links = await prisma.guardianPassenger.findMany({
       where: { guardianId: req.user.id },
-      include: { passenger: { select: { id: true, name: true, category: true, active: true } } },
+      include: {
+        passenger: {
+          select: {
+            id: true, name: true, category: true, active: true, routeId: true,
+            route: { select: { id: true, name: true } },
+          },
+        },
+      },
     });
     const kids = links.map((l) => l.passenger).filter((p) => p.active);
+    const dow = todayDow();
 
     const children = await Promise.all(
       kids.map(async (kid) => {
@@ -402,7 +410,37 @@ router.get(
         });
         const stop = assignment ? assignment.stop : null;
 
-        if (!best) return { id: kid.id, name: kid.name, category: kid.category, stop, trip: null };
+        // Runs scheduled for this child's route today that haven't started yet.
+        // Parents want to know the bus is coming BEFORE the driver taps Start.
+        let upcoming = [];
+        if (kid.routeId) {
+          const scheds = await prisma.tripSchedule.findMany({
+            where: { tenantId: req.tenantId, routeId: kid.routeId, active: true },
+            include: {
+              vehicle: { select: { regNumber: true, fleetNo: true } },
+              driver: { select: { name: true, phone: true } },
+            },
+            orderBy: { startTime: 'asc' },
+          });
+          const todaysTrips = await prisma.trip.findMany({
+            where: { routeId: kid.routeId, serviceDate: todayDate() },
+            select: { scheduleId: true },
+          });
+          const alreadyRun = new Set(todaysTrips.map((t) => t.scheduleId));
+          upcoming = scheds
+            .filter((s) => Array.isArray(s.daysOfWeek) && s.daysOfWeek.includes(dow) && !alreadyRun.has(s.id))
+            .map((s) => ({
+              id: s.id, name: s.name, startTime: s.startTime, direction: s.direction,
+              vehicle: s.vehicle, driver: s.driver,
+            }));
+        }
+
+        const base = {
+          id: kid.id, name: kid.name, category: kid.category,
+          stop, route: kid.route, upcoming,
+        };
+
+        if (!best) return { ...base, trip: null };
         const t = best.trip;
         const routeName = (await prisma.route.findUnique({ where: { id: t.routeId }, select: { name: true } }))?.name;
         const isLive = ACTIVE.includes(t.status);
@@ -413,7 +451,7 @@ router.get(
             })).map((p) => [p.lng, p.lat])
           : [];
         return {
-          id: kid.id, name: kid.name, category: kid.category, stop,
+          ...base,
           trip: {
             id: t.id,
             status: t.status,
