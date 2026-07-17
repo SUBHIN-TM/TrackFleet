@@ -38,6 +38,33 @@ const tripCounts = (passengers) => ({
   absent: passengers.filter((p) => p.status === 'ABSENT').length,
 });
 
+// Drop points that barely moved. A stationary bus heartbeats every few seconds,
+// so hundreds of near-identical fixes pile up on one spot and swamp the 500 we
+// keep — the real route then falls off the end of the window.
+function thinTrail(points, minMetres = 5) {
+  const out = [];
+  let prev = null;
+  for (const p of points) {
+    if (!prev || metresBetween(prev, p) >= minMetres) {
+      out.push(p);
+      prev = p;
+    }
+  }
+  // Always keep the latest fix: it's where the bus actually is.
+  const last = points[points.length - 1];
+  if (last && out[out.length - 1] !== last) out.push(last);
+  return out;
+}
+
+// Haversine — good enough at bus distances.
+function metresBetween(a, b) {
+  const R = 6371e3, toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 async function lastLocation(tripId) {
   const p = await prisma.locationPoint.findFirst({
     where: { tripId },
@@ -93,13 +120,16 @@ async function liveTripPayload(tripId, tenantId = null) {
       stops: { orderBy: { sequence: 'asc' }, select: { id: true, name: true, lat: true, lng: true, sequence: true } },
     },
   });
-  // Trail: oldest→newest so the polyline draws the path travelled.
-  const trail = await prisma.locationPoint.findMany({
+  // The path travelled. Take the NEWEST points and flip them back into order:
+  // `asc` + `take` grabbed the OLDEST 500, so on a long trip the line froze on
+  // the first few minutes and the bus appeared to leave no trail at all.
+  const recent = await prisma.locationPoint.findMany({
     where: { tripId: trip.id },
-    orderBy: { recordedAt: 'asc' },
+    orderBy: { recordedAt: 'desc' },
     take: 500,
     select: { lat: true, lng: true, recordedAt: true, speed: true },
   });
+  const trail = thinTrail(recent.reverse());
   const last = trail[trail.length - 1];
 
   return {
@@ -576,11 +606,15 @@ router.get(
           select: { name: true, stops: { orderBy: { sequence: 'asc' }, select: { id: true, name: true, lat: true, lng: true } } },
         });
         const routeName = tripRoute?.name;
+        // Newest 300, flipped back into order (asc+take took the OLDEST, so the
+        // parent's line froze at the start of the trip), then thinned.
         const trail = isLive
-          ? (await prisma.locationPoint.findMany({
-              where: { tripId: t.id }, orderBy: { recordedAt: 'asc' }, take: 300,
-              select: { lat: true, lng: true },
-            })).map((p) => [p.lng, p.lat])
+          ? thinTrail(
+              (await prisma.locationPoint.findMany({
+                where: { tripId: t.id }, orderBy: { recordedAt: 'desc' }, take: 300,
+                select: { lat: true, lng: true },
+              })).reverse()
+            ).map((p) => [p.lng, p.lat])
           : [];
 
         // The question a parent is actually asking: "how long until it matters
