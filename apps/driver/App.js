@@ -321,10 +321,13 @@ function TripScreen({ tripId, onExit }) {
     let alive = true;
     const tick = async () => {
       try {
-        const { pos, sent, queued } = await pushCurrentFix(tripId);
+        const { pos, offline: isOffline, queued } = await pushCurrentFix(tripId);
         if (!alive) return;
         setMe(pos);
-        setOffline(sent ? queued : queued || 1);
+        // Only warn when THIS send failed on the network. A leftover queue is
+        // not "no connection" — showing the banner while fixes were uploading
+        // fine told the driver they were untracked when they were.
+        setOffline(isOffline ? queued || 1 : 0);
       } catch {
         // No fix available right now — leave the map where it is.
       }
@@ -340,9 +343,9 @@ function TripScreen({ tripId, onExit }) {
   async function syncNow() {
     setSyncing(true);
     try {
-      const { pos, sent, queued } = await pushCurrentFix(tripId);
+      const { pos, sent, offline: isOffline, queued } = await pushCurrentFix(tripId);
       setMe(pos);
-      setOffline(queued);
+      setOffline(isOffline ? queued || 1 : 0);
       const at = await lastFixAt();
       setFixAge(at ? Math.round((Date.now() - at) / 1000) : null);
       const where = `${pos[1].toFixed(5)}, ${pos[0].toFixed(5)}`;
@@ -386,10 +389,9 @@ function TripScreen({ tripId, onExit }) {
     const t = setInterval(async () => {
       const at = await lastFixAt();
       if (alive) setFixAge(at ? Math.round((Date.now() - at) / 1000) : null);
-      if ((await queuedCount()) > 0) {
-        const { left } = await flushQueue();
-        if (alive) setOffline(left);
-      }
+      // Drain any backlog quietly; the banner is driven by live send results,
+      // not by the mere presence of a queue.
+      if ((await queuedCount()) > 0) await flushQueue();
     }, 4000);
     return () => { alive = false; clearInterval(t); };
   }, [tripId]);

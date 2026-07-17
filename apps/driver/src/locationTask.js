@@ -20,14 +20,27 @@ const TRIP_KEY = 'tf_active_trip';   // which trip the fixes belong to
 const LAST_KEY = 'tf_last_fix';      // when we last SENT one (UI freshness)
 const SEEN_KEY = 'tf_last_fix_ts';   // newest fix handled, kills duplicates
 const QUEUE_KEY = 'tf_fix_queue';    // fixes waiting for a connection
+const QLEN_KEY = 'tf_queue_len';     // just the count, so the UI needn't parse the queue
+const POS_KEY = 'tf_last_pos';       // "lng,lat" of the last fix we SENT
 const QUEUE_MAX = 500;               // ~25 min of 3s fixes; then drop oldest
 
 export const setActiveTrip = (tripId) => AsyncStorage.setItem(TRIP_KEY, tripId);
-export const clearActiveTrip = () => AsyncStorage.multiRemove([TRIP_KEY, LAST_KEY, QUEUE_KEY, SEEN_KEY]);
+export const clearActiveTrip = () =>
+  AsyncStorage.multiRemove([TRIP_KEY, LAST_KEY, QUEUE_KEY, QLEN_KEY, POS_KEY, SEEN_KEY]);
 export const lastFixAt = async () => {
   const v = await AsyncStorage.getItem(LAST_KEY);
   return v ? Number(v) : null;
 };
+
+// Where the last SENT fix was — the UI reads this instead of asking the GPS for
+// a new position every few seconds. Cheap, and it guarantees the driver's map
+// shows exactly what the admin's map shows.
+export async function lastSentPosition() {
+  const v = await AsyncStorage.getItem(POS_KEY);
+  if (!v) return null;
+  const [lng, lat] = v.split(',').map(Number);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+}
 
 // ---- the queue --------------------------------------------------------------
 
@@ -36,10 +49,13 @@ async function readQueue() {
 }
 async function writeQueue(q) {
   // Keep the newest if we overflow: a fresh position matters more than an old one.
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(q.slice(-QUEUE_MAX)));
+  const kept = q.slice(-QUEUE_MAX);
+  await AsyncStorage.multiSet([[QUEUE_KEY, JSON.stringify(kept)], [QLEN_KEY, String(kept.length)]]);
 }
+// Reads a single small number — parsing the whole queue on a timer was making
+// the app crawl.
 export async function queuedCount() {
-  return (await readQueue()).length;
+  return Number(await AsyncStorage.getItem(QLEN_KEY)) || 0;
 }
 
 // An Expo location -> the shape the API takes.
@@ -60,19 +76,30 @@ async function upload(tripId, fix) {
     auth: true,
     body: { lat: fix.lat, lng: fix.lng, speed: fix.speed, heading: fix.heading, recordedAt: fix.recordedAt },
   });
-  await AsyncStorage.multiSet([[SEEN_KEY, String(fix.ts)], [LAST_KEY, String(Date.now())]]);
+  await AsyncStorage.multiSet([
+    [SEEN_KEY, String(fix.ts)],
+    [LAST_KEY, String(Date.now())],
+    [POS_KEY, `${fix.lng},${fix.lat}`],
+  ]);
 }
 
-// Send it, or keep it for later. Returns true only if it really went.
+// Send it, or keep it for later.
+//   { sent: true }                    → really uploaded
+//   { sent: false, offline: true }    → no signal (or server down): queued
+//   { sent: false, offline: false }   → the server REFUSED it (e.g. the trip
+//                                       ended). Queuing would retry forever and
+//                                       falsely report "no connection", so drop.
 async function sendOrQueue(tripId, fix) {
   try {
     await upload(tripId, fix);
-    return true;
-  } catch {
+    return { sent: true, offline: false };
+  } catch (err) {
+    const retryable = err.offline || (err.status >= 500);
+    if (!retryable) return { sent: false, offline: false, refused: err.message };
     const q = await readQueue();
     q.push({ tripId, ...fix });
     await writeQueue(q);
-    return false;
+    return { sent: false, offline: true };
   }
 }
 
@@ -86,8 +113,9 @@ export async function flushQueue() {
     try {
       await upload(q[i].tripId, q[i]);
       sent++;
-    } catch {
-      await writeQueue(q.slice(i));
+    } catch (err) {
+      if (!err.offline && err.status < 500) continue; // refused for good: skip it
+      await writeQueue(q.slice(i)); // still offline — keep the rest, in order
       return { sent, left: q.length - i };
     }
   }
@@ -109,7 +137,7 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
     .sort((a, b) => a.timestamp - b.timestamp);
   if (!fresh.length) return;
 
-  await flushQueue(); // signal may be back — send the backlog first, in order
+  if (await queuedCount()) await flushQueue(); // signal may be back — backlog first, in order
   for (const loc of fresh) await sendOrQueue(tripId, toFix(loc));
 });
 
@@ -121,11 +149,13 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 // screen shows something newer; everything on screen comes through here so the
 // driver and the admin cannot disagree.
 export async function pushCurrentFix(tripId) {
-  const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
+  // High is accurate to a few metres and far cheaper than BestForNavigation,
+  // which was pinning the GPS and making the whole app crawl.
+  const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
   const fix = toFix(loc);
-  await flushQueue();
-  const sent = await sendOrQueue(tripId, fix);
-  return { pos: [fix.lng, fix.lat], sent, queued: await queuedCount() };
+  if (await queuedCount()) await flushQueue();
+  const { sent, offline } = await sendOrQueue(tripId, fix);
+  return { pos: [fix.lng, fix.lat], sent, offline, queued: await queuedCount() };
 }
 
 // Start streaming for a trip. Returns 'on' | 'foreground-only' | 'denied' | 'error'.
@@ -136,6 +166,10 @@ export async function startTracking(tripId) {
   const bg = await Location.requestBackgroundPermissionsAsync();
 
   await setActiveTrip(tripId);
+  // A new run starts clean. Leftovers from an earlier trip are worthless — that
+  // trip has ended, so the server rejects them and they'd sit in the queue
+  // forever making the app claim "no connection".
+  await writeQueue([]);
 
   // Put the bus on everyone's map NOW. Android only delivers a location once
   // the phone has MOVED, so a driver who starts while parked used to send

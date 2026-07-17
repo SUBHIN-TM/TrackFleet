@@ -26,11 +26,19 @@ export async function apiFetch(path, { method = 'GET', body, auth = false } = {}
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
-    // Network-level failure (wrong IP, backend down, phone off Wi-Fi).
-    throw new Error(`Can’t reach the server at ${API_URL}. Check the address in config.js and that the backend is running.`);
+    // Network-level failure: no signal, DNS, server unreachable. Flagged so
+    // callers can tell "no connection" from "the server said no" — treating
+    // every error as offline made the app cry 'no connection' on good signal.
+    const err = new Error('No connection to the server.');
+    err.offline = true;
+    throw err;
   }
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status; // reached the server fine — it refused
+    throw err;
+  }
   return data;
 }
