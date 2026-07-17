@@ -2,6 +2,7 @@ import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiFetch } from './api';
+import { decideFix } from './gpsFilter';
 
 // ============================================================================
 // Background location + offline queue.
@@ -22,11 +23,12 @@ const SEEN_KEY = 'tf_last_fix_ts';   // newest fix handled, kills duplicates
 const QUEUE_KEY = 'tf_fix_queue';    // fixes waiting for a connection
 const QLEN_KEY = 'tf_queue_len';     // just the count, so the UI needn't parse the queue
 const POS_KEY = 'tf_last_pos';       // "lng,lat" of the last fix we SENT
+const ANCHOR_KEY = 'tf_anchor';      // where we believe the bus actually is
 const QUEUE_MAX = 500;               // ~25 min of 3s fixes; then drop oldest
 
 export const setActiveTrip = (tripId) => AsyncStorage.setItem(TRIP_KEY, tripId);
 export const clearActiveTrip = () =>
-  AsyncStorage.multiRemove([TRIP_KEY, LAST_KEY, QUEUE_KEY, QLEN_KEY, POS_KEY, SEEN_KEY]);
+  AsyncStorage.multiRemove([TRIP_KEY, LAST_KEY, QUEUE_KEY, QLEN_KEY, POS_KEY, SEEN_KEY, ANCHOR_KEY]);
 export const lastFixAt = async () => {
   const v = await AsyncStorage.getItem(LAST_KEY);
   return v ? Number(v) : null;
@@ -65,9 +67,30 @@ const toFix = (loc) => ({
   // m/s -> km/h; negative means "unknown" on Android.
   speed: loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed * 3.6 : undefined,
   heading: loc.coords.heading >= 0 ? loc.coords.heading : undefined,
+  // How much to trust the above. Not sent to the server — used here to decide
+  // whether this fix deserves to move the bus at all.
+  accuracy: loc.coords.accuracy ?? null,
   recordedAt: new Date(loc.timestamp).toISOString(),
   ts: loc.timestamp,
 });
+
+// ---- standing still ---------------------------------------------------------
+
+async function readAnchor() {
+  try { return JSON.parse(await AsyncStorage.getItem(ANCHOR_KEY)) || null; } catch { return null; }
+}
+
+// Storage around the pure decision in gpsFilter.js (which is unit-tested).
+// Returns the fix to report, or null if it isn't worth reporting.
+//
+// The state is persisted on EVERY outcome, not just movement: it also counts
+// how many fixes in a row have escaped the anchor, and losing that count would
+// mean no movement could ever be confirmed.
+async function settle(raw, { force = false } = {}) {
+  const decision = decideFix(await readAnchor(), raw, { force });
+  if (decision.state) await AsyncStorage.setItem(ANCHOR_KEY, JSON.stringify(decision.state));
+  return decision.action === 'drop' ? null : decision.fix;
+}
 
 // Raw upload. Throws on any failure — callers decide whether to queue.
 async function upload(tripId, fix) {
@@ -138,7 +161,10 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   if (!fresh.length) return;
 
   if (await queuedCount()) await flushQueue(); // signal may be back — backlog first, in order
-  for (const loc of fresh) await sendOrQueue(tripId, toFix(loc));
+  for (const loc of fresh) {
+    const fix = await settle(toFix(loc));
+    if (fix) await sendOrQueue(tripId, fix);
+  }
 });
 
 // ---- foreground helpers -----------------------------------------------------
@@ -148,14 +174,25 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 // stream replays Android's cached location, which can be minutes old while the
 // screen shows something newer; everything on screen comes through here so the
 // driver and the admin cannot disagree.
-export async function pushCurrentFix(tripId) {
+//
+// `force` is the driver pressing "Locate me": they are telling us the bus is
+// somewhere else, so the anchor moves even if the deadband would have held it.
+// That's the whole point of the button — it's the manual override.
+export async function pushCurrentFix(tripId, { force = false } = {}) {
   // High is accurate to a few metres and far cheaper than BestForNavigation,
   // which was pinning the GPS and making the whole app crawl.
   const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-  const fix = toFix(loc);
+  const raw = toFix(loc);
+  const fix = await settle(raw, { force });
+  // Too vague to place the bus. Say so rather than move it somewhere wrong.
+  if (!fix) return { pos: null, sent: false, offline: false, vague: raw.accuracy, queued: await queuedCount() };
+
   if (await queuedCount()) await flushQueue();
   const { sent, offline } = await sendOrQueue(tripId, fix);
-  return { pos: [fix.lng, fix.lat], sent, offline, queued: await queuedCount() };
+  return {
+    pos: [fix.lng, fix.lat], sent, offline, held: !!fix.held,
+    accuracy: raw.accuracy, queued: await queuedCount(),
+  };
 }
 
 // Start streaming for a trip. Returns 'on' | 'foreground-only' | 'denied' | 'error'.
@@ -168,13 +205,18 @@ export async function startTracking(tripId) {
   await setActiveTrip(tripId);
   // A new run starts clean. Leftovers from an earlier trip are worthless — that
   // trip has ended, so the server rejects them and they'd sit in the queue
-  // forever making the app claim "no connection".
+  // forever making the app claim "no connection". The anchor goes too: it marks
+  // where the LAST run finished.
   await writeQueue([]);
+  await AsyncStorage.removeItem(ANCHOR_KEY);
 
   // Put the bus on everyone's map NOW. Android only delivers a location once
   // the phone has MOVED, so a driver who starts while parked used to send
   // nothing at all — the admin saw "No GPS" and no bus icon.
-  try { await pushCurrentFix(tripId); } catch { /* no fix yet; the stream follows */ }
+  // `force` because a roughly-placed bus beats no bus: the GPS is still warming
+  // up, so this first fix may be vague, and the stream sharpens it within
+  // seconds (an accurate fix easily escapes a vague anchor's deadband).
+  try { await pushCurrentFix(tripId, { force: true }); } catch { /* no fix yet; the stream follows */ }
 
   try {
     if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) {

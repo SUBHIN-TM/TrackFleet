@@ -325,7 +325,9 @@ function TripScreen({ tripId, onExit }) {
       try {
         const { pos, offline: isOffline, queued } = await pushCurrentFix(tripId);
         if (!alive) return;
-        setMe(pos);
+        // pos is null when the fix was too vague to trust. Keep the last good
+        // position rather than blanking the bus.
+        if (pos) setMe(pos);
         // Only warn when THIS send failed on the network. A leftover queue is
         // not "no connection" — showing the banner while fixes were uploading
         // fine told the driver they were untracked when they were.
@@ -339,13 +341,46 @@ function TripScreen({ tripId, onExit }) {
     return () => { alive = false; clearInterval(t); };
   }, [tripId]);
 
+  // The map's "Locate me": re-read the GPS, move the anchor, and re-centre.
+  // Silent — the driver can see the result on the map, so an alert would only
+  // be in the way. Returns the position for the camera.
+  const locateMe = useCallback(async () => {
+    try {
+      const { pos, offline: isOffline, queued, vague } = await pushCurrentFix(tripId, { force: true });
+      if (!pos) {
+        Alert.alert(
+          'Weak GPS signal',
+          `The phone can only place you to within ${Math.round(vague || 0)}m right now, so the bus hasn't been moved. ` +
+          'Try again with a clear view of the sky.'
+        );
+        return null;
+      }
+      setMe(pos);
+      setOffline(isOffline ? queued || 1 : 0);
+      const at = await lastFixAt();
+      setFixAge(at ? Math.round((Date.now() - at) / 1000) : null);
+      return pos;
+    } catch {
+      Alert.alert('Couldn’t get a fix', 'Make sure location is on, then try again.');
+      return null;
+    }
+  }, [tripId]);
+
   // Manual re-sync. Reports what ACTUALLY happened: claiming "sent" while
   // offline is how a driver ends up believing they're tracked when they're not.
   const [syncing, setSyncing] = useState(false);
   async function syncNow() {
     setSyncing(true);
     try {
-      const { pos, sent, offline: isOffline, queued } = await pushCurrentFix(tripId);
+      const { pos, sent, offline: isOffline, queued, vague } = await pushCurrentFix(tripId, { force: true });
+      if (!pos) {
+        Alert.alert(
+          'Weak GPS signal',
+          `The phone can only place you to within ${Math.round(vague || 0)}m right now. Nothing was shared, ` +
+          'because a guess would put the bus on the wrong street. Try again with a clear view of the sky.'
+        );
+        return;
+      }
       setMe(pos);
       setOffline(isOffline ? queued || 1 : 0);
       const at = await lastFixAt();
@@ -508,7 +543,8 @@ function TripScreen({ tripId, onExit }) {
         {/* Where I am, the road ahead, and proof the GPS is alive. */}
         {live?.route?.stops?.length > 0 && (
           <SafeMap stops={live.route.stops} me={me} routeLine={routeLine} nextStop={nextStop} height={280}
-            onGrab={() => setPageScroll(false)} onRelease={() => setPageScroll(true)} />
+            onGrab={() => setPageScroll(false)} onRelease={() => setPageScroll(true)}
+            onLocate={locateMe} />
         )}
 
         {nextStop && (

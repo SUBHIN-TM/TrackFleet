@@ -12,10 +12,11 @@ const FALLBACK_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
 // The driver's own view: where I am, the road ahead, which stop is next — and
 // proof their GPS is alive (the dot moves with them).
-export default function TripMap({ stops = [], me, routeLine = [], nextStop, height = 260, onGrab, onRelease }) {
+export default function TripMap({ stops = [], me, routeLine = [], nextStop, height = 260, onGrab, onRelease, onLocate }) {
   const [styleUrl, setStyleUrl] = useState(null);
   const [ready, setReady] = useState(false);
   const [follow, setFollow] = useState(true);
+  const [locating, setLocating] = useState(false);
   const [zoom, setZoom] = useState(15);
   const camera = useRef(null);
 
@@ -26,9 +27,22 @@ export default function TripMap({ stops = [], me, routeLine = [], nextStop, heig
     setZoom(z);
     camera.current?.zoomTo(z, { duration: 250 });
   };
-  const recenter = () => {
+  // "Locate me" reads the GPS again rather than just flying to the last known
+  // dot: when the driver presses this, the bus is usually in the WRONG place,
+  // so re-centring on the same stale position would look broken. onLocate
+  // re-anchors and returns where we really are.
+  const locate = async () => {
     setFollow(true);
-    if (me) camera.current?.easeTo({ center: me, zoom: Math.max(zoom, 15), duration: 500 });
+    if (!onLocate) { if (me) camera.current?.easeTo({ center: me, zoom: Math.max(zoom, 16), duration: 500 }); return; }
+    setLocating(true);
+    try {
+      const pos = (await onLocate()) || me;
+      if (pos) {
+        const z = Math.max(zoom, 16);
+        setZoom(z);
+        camera.current?.easeTo({ center: pos, zoom: z, duration: 600 });
+      }
+    } finally { setLocating(false); }
   };
 
   // The server owns the style, so the provider can change without a new APK.
@@ -109,10 +123,11 @@ export default function TripMap({ stops = [], me, routeLine = [], nextStop, heig
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={[styles.followBtn, follow && styles.followOn]} onPress={recenter}>
-        <Text style={[styles.followText, follow && { color: '#fff' }]}>
-          {follow ? 'Following you' : 'Centre on me'}
-        </Text>
+      <TouchableOpacity style={[styles.followBtn, follow && styles.followOn]} onPress={locate} disabled={locating}>
+        {/* One button, one job. The blue fill means the map is following you. */}
+        {locating
+          ? <ActivityIndicator size="small" color={follow ? '#fff' : '#334155'} />
+          : <Text style={[styles.followText, follow && { color: '#fff' }]}>Locate me</Text>}
       </TouchableOpacity>
     </View>
   );
