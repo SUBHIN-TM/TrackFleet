@@ -237,7 +237,9 @@ function TripScreen({ tripId, onExit }) {
       if (status !== 'granted') { setGps('denied'); return; }
       try {
         watcher.current = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, timeInterval: 6000, distanceInterval: 20 },
+          // Tight cadence so the bus on everyone's map matches reality — the
+          // web clients interpolate between these fixes for smooth motion.
+          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 8 },
           (pos) => {
             if (cancelled) return;
             setGps('on');
