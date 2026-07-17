@@ -314,7 +314,11 @@ function TripScreen({ tripId, onExit }) {
     let alive = true;
     const tick = async () => {
       try {
-        const p = await Location.getLastKnownPositionAsync();
+        // getLastKnownPosition only reads a CACHED fix — on a phone that hasn't
+        // moved there may be none, which left the map with no bus at all. Fall
+        // back to actively asking for one.
+        let p = await Location.getLastKnownPositionAsync();
+        if (!p) p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         if (alive && p) setMe([p.coords.longitude, p.coords.latitude]);
       } catch { /* no fix yet */ }
     };
