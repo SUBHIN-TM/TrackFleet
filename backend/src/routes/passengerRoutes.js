@@ -237,6 +237,46 @@ router.patch(
   })
 );
 
+// PATCH /api/passengers/guardians/:guardianId — edit a parent's name/phone.
+// The phone IS their login handle, so changing it changes how they sign in:
+// keep `phone` and `loginId` in lockstep and reject a number already in use.
+const guardianUpdateSchema = z.object({
+  name: z.string().min(2, 'name is too short').optional(),
+  phone: z.string().min(5, 'enter a phone number').optional(),
+});
+router.patch(
+  '/guardians/:guardianId',
+  asyncHandler(async (req, res) => {
+    const data = parseOr400(guardianUpdateSchema, req.body);
+    const guardian = await prisma.user.findFirst({
+      where: { id: req.params.guardianId, tenantId: req.tenantId, role: 'GUARDIAN' },
+    });
+    if (!guardian) throw new ApiError(404, 'Guardian not found');
+
+    const patch = {};
+    if (data.name !== undefined) patch.name = data.name;
+    if (data.phone !== undefined) {
+      const loginId = normalizePhone(data.phone);
+      if (!loginId) throw new ApiError(400, 'Enter a valid phone number');
+      if (loginId !== guardian.loginId) {
+        const taken = await prisma.user.findFirst({
+          where: { tenantId: req.tenantId, loginId, id: { not: guardian.id } },
+        });
+        if (taken) throw new ApiError(409, 'That phone number is already used by another login');
+      }
+      patch.phone = data.phone;
+      patch.loginId = loginId;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: guardian.id },
+      data: patch,
+      select: { id: true, name: true, phone: true, loginId: true, provisionalPassword: true },
+    });
+    res.json({ guardian: updated });
+  })
+);
+
 // POST /api/passengers/guardians/:guardianId/reset-password — the admin owns
 // guardian passwords (same model as drivers): pass a chosen `password` or omit
 // to generate one. Stored re-viewable so it can be re-shared on WhatsApp.

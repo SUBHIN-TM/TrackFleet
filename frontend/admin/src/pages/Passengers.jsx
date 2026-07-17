@@ -52,6 +52,11 @@ export default function Passengers() {
   const [resetPw, setResetPw] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
   const [resetErr, setResetErr] = useState('');
+  // Edit the guardian's own details (name / phone-login).
+  const [gEditOpen, setGEditOpen] = useState(false);
+  const [gEditForm, setGEditForm] = useState({ name: '', phone: '' });
+  const [gEditBusy, setGEditBusy] = useState(false);
+  const [gEditErr, setGEditErr] = useState('');
 
   async function load() {
     const { data } = await api.get('/api/passengers');
@@ -126,6 +131,30 @@ export default function Passengers() {
       id: g.id, name: g.name, orgId, login: g.loginId || g.phone, password: g.provisionalPassword,
       link: parentLink(orgId, g.loginId || g.phone),
     });
+  }
+
+  // Edit the parent's name / phone. Phone doubles as their login, so a change
+  // here also changes their sign-in details (and the shareable portal link).
+  function openGuardianEdit() {
+    setGEditForm({ name: gCreds?.name || '', phone: gCreds?.login || '' });
+    setGEditErr(''); setGEditOpen(true);
+  }
+  async function saveGuardianEdit() {
+    if (gEditForm.name.trim().length < 2) return setGEditErr('Enter the parent’s name');
+    if (gEditForm.phone.trim().length < 5) return setGEditErr('Enter a valid phone number');
+    setGEditErr(''); setGEditBusy(true);
+    try {
+      const { data } = await api.patch(`/api/passengers/guardians/${gCreds.id}`, {
+        name: gEditForm.name.trim(), phone: gEditForm.phone.trim(),
+      });
+      const g = data.guardian;
+      // Login + portal link follow the phone.
+      setGCreds((c) => c && { ...c, name: g.name, login: g.loginId, link: parentLink(c.orgId, g.loginId) });
+      setGEditOpen(false);
+      load();
+    } catch (err) {
+      setGEditErr(err.response?.data?.error || 'Failed');
+    } finally { setGEditBusy(false); }
   }
 
   // Reset the parent's password — prefilled suggestion the admin can keep or edit.
@@ -308,10 +337,46 @@ export default function Passengers() {
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2, justifyContent: 'space-between' }}>
-          <Button startIcon={<RestartAltIcon />} color="warning" onClick={openReset} disabled={!gCreds?.id}>
-            Reset password
-          </Button>
+          <Stack direction="row" spacing={0.5}>
+            <Button startIcon={<EditOutlinedIcon />} onClick={openGuardianEdit} disabled={!gCreds?.id}>
+              Edit details
+            </Button>
+            <Button startIcon={<RestartAltIcon />} color="warning" onClick={openReset} disabled={!gCreds?.id}>
+              Reset password
+            </Button>
+          </Stack>
           <Button variant="contained" onClick={() => setGCreds(null)} sx={{ borderRadius: 2.5, px: 3 }}>Done</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit parent details — phone is their login, so warn on change. */}
+      <Dialog open={gEditOpen} onClose={() => setGEditOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Edit parent details</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} mt={1}>
+            {gEditErr && <Alert severity="error">{gEditErr}</Alert>}
+            <TextField autoFocus label="Parent name" value={gEditForm.name} fullWidth
+              onChange={(e) => setGEditForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. Priya Kumar" />
+            <TextField label="Phone (their login)" value={gEditForm.phone} fullWidth
+              onChange={(e) => setGEditForm((f) => ({ ...f, phone: e.target.value }))}
+              helperText="Must be unique in your organization" />
+            {gEditForm.phone.trim() !== (gCreds?.login || '') && gEditForm.phone.trim() && (
+              <Alert severity="warning" sx={{ py: 0.5 }}>
+                Changing the phone changes how this parent signs in — re-share their sign-in details afterwards. Their password stays the same.
+              </Alert>
+            )}
+            <Typography variant="caption" color="text.secondary">
+              This parent may be linked to several passengers — these details apply to all of them.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setGEditOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={saveGuardianEdit}
+            disabled={gEditBusy || gEditForm.name.trim().length < 2 || gEditForm.phone.trim().length < 5}>
+            {gEditBusy ? 'Saving…' : 'Save'}
+          </Button>
         </DialogActions>
       </Dialog>
 
