@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { api } from './api.js';
+import { closeLiveSocket } from './liveSocket.js';
 
 const AuthCtx = createContext(null);
 
@@ -42,6 +43,9 @@ export function AuthProvider({ children }) {
   function logout() {
     localStorage.removeItem('tf_parent_token');
     localStorage.removeItem('tf_parent_user');
+    // The live socket was authorized as THIS guardian at handshake time and
+    // still sits in their child's trip room. Dropping the token doesn't close it.
+    closeLiveSocket();
     setUser(null);
   }
 

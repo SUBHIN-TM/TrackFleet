@@ -67,8 +67,8 @@ const toFix = (loc) => ({
   // m/s -> km/h; negative means "unknown" on Android.
   speed: loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed * 3.6 : undefined,
   heading: loc.coords.heading >= 0 ? loc.coords.heading : undefined,
-  // How much to trust the above. Not sent to the server — used here to decide
-  // whether this fix deserves to move the bus at all.
+  // How much to trust the above: used here to decide whether this fix deserves
+  // to move the bus at all, and sent on so the server can weight it too.
   accuracy: loc.coords.accuracy ?? null,
   recordedAt: new Date(loc.timestamp).toISOString(),
   ts: loc.timestamp,
@@ -93,11 +93,19 @@ async function settle(raw, { force = false } = {}) {
 }
 
 // Raw upload. Throws on any failure — callers decide whether to queue.
+//
+// `accuracy` and `held` travel WITH the fix. The phone is the only place that
+// knows how good a reading was, and the server needs it twice over: to weight
+// this point in the map matcher, and to keep a parked-bus anchor distinguishable
+// from a real measurement in the audit trail.
 async function upload(tripId, fix) {
   await apiFetch(`/api/trips/${tripId}/location`, {
     method: 'POST',
     auth: true,
-    body: { lat: fix.lat, lng: fix.lng, speed: fix.speed, heading: fix.heading, recordedAt: fix.recordedAt },
+    body: {
+      lat: fix.lat, lng: fix.lng, speed: fix.speed, heading: fix.heading,
+      recordedAt: fix.recordedAt, accuracy: fix.accuracy, held: !!fix.held,
+    },
   });
   await AsyncStorage.multiSet([
     [SEEN_KEY, String(fix.ts)],

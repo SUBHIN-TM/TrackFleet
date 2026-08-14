@@ -13,8 +13,12 @@ import SensorsRoundedIcon from '@mui/icons-material/SensorsRounded';
 import { api } from '../lib/api.js';
 import PageHeader from '../components/PageHeader.jsx';
 import PlatformMap from '../components/PlatformMap.jsx';
+import { useLivePosition } from '../lib/liveSocket.js';
 
 const POLL_MS = 5000;
+// The passenger board and trail change on a human timescale, not a GPS one.
+// Only used once positions are arriving pushed; otherwise POLL_MS still rules.
+const BOARD_POLL_MS = 15000;
 
 const STATUS_META = {
   'not-started': { label: 'Not started', color: 'default' },
@@ -61,6 +65,14 @@ function gpsHealth(lastLocation) {
   };
 }
 
+// Whichever fix was actually taken later. The pushed one usually wins, but a
+// poll can legitimately be ahead just after the socket reconnects.
+function newerFix(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return new Date(a.recordedAt) >= new Date(b.recordedAt) ? a : b;
+}
+
 export default function LiveToday() {
   const [runs, setRuns] = useState(null);
   const [viewTripId, setViewTripId] = useState(null);
@@ -85,6 +97,10 @@ export default function LiveToday() {
     } catch { /* trip may have ended */ }
   }
 
+  // The bus position now arrives pushed, the instant the driver's phone reports
+  // it, instead of on the next poll.
+  const { fix: pushedFix, live: pushLive } = useLivePosition(viewTripId);
+
   // Poll the board always; poll the open trip faster context too.
   useEffect(() => {
     loadRuns();
@@ -98,12 +114,22 @@ export default function LiveToday() {
   useEffect(() => {
     if (!viewTripId) { setLive(null); return; }
     loadLive(viewTripId);
-    const t = setInterval(() => loadLive(viewTripId), POLL_MS);
+    // With positions pushed, this poll is only carrying the slow-moving half of
+    // the payload — the passenger board, counts, and the snapped trail. Running
+    // it at 5s refetched hundreds of trail points to learn nothing. When the
+    // push channel is down it goes back to being the only source, so it stays
+    // at the old rate.
+    const every = pushLive ? BOARD_POLL_MS : POLL_MS;
+    const t = setInterval(() => loadLive(viewTripId), every);
     return () => clearInterval(t);
-  }, [viewTripId]);
+  }, [viewTripId, pushLive]);
 
   const liveCount = runs?.filter((r) => r.trip && ['STARTED', 'IN_PROGRESS'].includes(r.trip.status)).length || 0;
-  const lastLoc = live?.lastLocation;
+  // Prefer the pushed fix; fall back to whatever the last poll carried. Newer
+  // wins outright rather than merging: a fix is one coherent observation, and
+  // blending a fresh position with a stale speed describes no real moment.
+  const polledLoc = live?.lastLocation;
+  const lastLoc = newerFix(pushedFix, polledLoc);
   const viewIsLive = live && ['STARTED', 'IN_PROGRESS'].includes(live.trip.status);
   const stillOnboard = live?.passengers?.filter((p) => p.status === 'ONBOARD') || [];
 

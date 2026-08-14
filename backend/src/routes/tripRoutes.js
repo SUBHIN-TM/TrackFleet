@@ -4,7 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { asyncHandler, ApiError, parseOr400 } from '../lib/http.js';
 import { authenticate, authorize, requireTenant } from '../middleware/auth.js';
 import { notifyUser } from '../lib/notify.js';
-import { etaBetween } from '../lib/osrm.js';
+import { etaBetween, osrmMatch } from '../lib/osrm.js';
 
 // ============================================================================
 // Trips — the live layer. A TripSchedule is the plan; a Trip is one concrete
@@ -65,13 +65,82 @@ function metresBetween(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+// A bus is not a teleporter. The driver app already filters noise, but it is
+// the only thing standing between a broken receiver — or a forged request from
+// a driver's stolen token — and the map every parent is watching.
+//
+// Deliberately generous: this rejects the impossible, not the unlikely. A
+// genuine gap in reporting (tunnel, dead signal) legitimately covers real
+// ground, so the allowance grows with the gap and only the ceiling is fixed.
+const MAX_KMH = 160;          // motorway coach, with room to spare
+const JUMP_GRACE_M = 250;     // absorbs a re-acquired fix after a signal gap
+
+export function implausible(prev, next) {
+  if (!prev) return null; // first point of a trip — nothing to contradict
+  const seconds = Math.abs(next.recordedAt - new Date(prev.recordedAt)) / 1000;
+  // Same instant, different place: no elapsed time can justify any distance.
+  if (seconds <= 0) {
+    return metresBetween(prev, next) > JUMP_GRACE_M ? 'duplicate-timestamp-jump' : null;
+  }
+  const metres = metresBetween(prev, next);
+  const allowed = (MAX_KMH / 3.6) * seconds + JUMP_GRACE_M;
+  return metres > allowed ? `implausible-jump:${Math.round(metres)}m/${Math.round(seconds)}s` : null;
+}
+
+// ---------------------------------------------------------------------------
+// Road-snapped trail, cached per trip.
+//
+// Matching happens on read because the raw points are insert-only (rule #2) and
+// a snap needs the trace AROUND a point, which doesn't exist yet when it lands.
+// The cache is what makes that affordable: every admin and every parent watching
+// one bus polls on its own 5s timer, and they must not each cost an OSRM call.
+// One match per trip per window, shared by all of them.
+const MATCH_TTL_MS = 5000;
+const matchCache = new Map(); // tripId -> { at, key, trail }
+
+async function matchedTrail(tripId, rawTrail) {
+  if (rawTrail.length < 2) return rawTrail;
+
+  // Key on the newest point: while the bus sits still nothing needs re-matching,
+  // and the moment it moves the key changes and the snap refreshes.
+  const tip = rawTrail[rawTrail.length - 1];
+  const key = `${rawTrail.length}:${tip.lat.toFixed(5)},${tip.lng.toFixed(5)}`;
+  const hit = matchCache.get(tripId);
+  if (hit && hit.key === key && Date.now() - hit.at < MATCH_TTL_MS) return hit.trail;
+
+  const snapped = await osrmMatch(rawTrail);
+  // Keep each point's own timestamp and speed — only the position is corrected.
+  // A null entry means OSRM wouldn't place that point; keep the raw one.
+  const trail = snapped
+    ? rawTrail.map((p, i) => (snapped[i] ? { ...p, ...snapped[i], snapped: true } : p))
+    : rawTrail;
+
+  if (matchCache.size > 500) matchCache.clear(); // crude bound, same as the ETA cache
+  matchCache.set(tripId, { at: Date.now(), key, trail });
+  return trail;
+}
+
 async function lastLocation(tripId) {
   const p = await prisma.locationPoint.findFirst({
     where: { tripId },
     orderBy: { recordedAt: 'desc' },
-    select: { lat: true, lng: true, speed: true, heading: true, recordedAt: true },
+    select: { lat: true, lng: true, speed: true, heading: true, recordedAt: true, accuracy: true, held: true },
   });
   return p || null;
+}
+
+// Authorize a driver's write against a trip WITHOUT dragging the passenger
+// board along. `ownTripOr404` joins every TripPassenger and every Passenger
+// behind it — sensible for the boarding screen, absurd at 1200 GPS pings per
+// bus per hour, which is the one endpoint that never looks at a passenger.
+async function driverTripOr404(req) {
+  const trip = await prisma.trip.findFirst({
+    where: { id: req.params.id, tenantId: req.tenantId },
+    select: { id: true, status: true, driverId: true },
+  });
+  if (!trip) throw new ApiError(404, 'Trip not found');
+  if (trip.driverId !== req.user.id) throw new ApiError(403, 'This is not your trip');
+  return trip;
 }
 
 // Load a trip and assert it belongs to this tenant (and this driver, if asked).
@@ -123,14 +192,27 @@ async function liveTripPayload(tripId, tenantId = null) {
   // The path travelled. Take the NEWEST points and flip them back into order:
   // `asc` + `take` grabbed the OLDEST 500, so on a long trip the line froze on
   // the first few minutes and the bus appeared to leave no trail at all.
+  //
+  // `held: false` is what makes the 500 mean something. A parked bus heartbeats
+  // every 3s onto one spot, so a 20-minute wait used to fill the whole window
+  // with a single position and push the real route off the end — thinning them
+  // afterwards was too late, they had already been counted. Excluding them in
+  // SQL spends the window on places the bus actually went.
   const recent = await prisma.locationPoint.findMany({
-    where: { tripId: trip.id },
+    where: { tripId: trip.id, held: false },
     orderBy: { recordedAt: 'desc' },
     take: 500,
-    select: { lat: true, lng: true, recordedAt: true, speed: true },
+    select: { lat: true, lng: true, recordedAt: true, speed: true, accuracy: true },
   });
-  const trail = thinTrail(recent.reverse());
-  const last = trail[trail.length - 1];
+  const rawTrail = thinTrail(recent.reverse());
+
+  // Snap the line to the roads. Falls back to the raw trail whenever matching
+  // is unavailable or declines a point — a wandering line beats no line.
+  const trail = await matchedTrail(trip.id, rawTrail);
+
+  // Where the bus IS comes from the newest point of all, held or not: a parked
+  // bus is excluded from the line above but must still sit on the map.
+  const last = (await lastLocation(trip.id)) || trail[trail.length - 1];
 
   return {
     trip: {
@@ -334,23 +416,51 @@ router.post(
         speed: z.coerce.number().optional(),
         heading: z.coerce.number().optional(),
         recordedAt: z.coerce.date().optional(),
+        accuracy: z.coerce.number().min(0).optional(),
+        held: z.coerce.boolean().optional(),
       }),
       req.body
     );
-    const trip = await ownTripOr404(req, { driverOnly: true });
+    const trip = await driverTripOr404(req);
     if (!ACTIVE.includes(trip.status)) throw new ApiError(409, 'Trip is not running');
+
+    // The device clock is not ours and not trustworthy. Every read orders by
+    // recordedAt, so a phone an hour fast would park its fix permanently at the
+    // head of the trail and the bus would never appear to move again. Accept
+    // the past (offline replay is legitimate) but never the future.
+    const now = new Date();
+    const claimed = data.recordedAt || now;
+    const recordedAt = claimed > now ? now : claimed;
+
+    // One implausible fix must not become "where the bus is". Compare against
+    // the last known point: nothing on a road covers 400 m in a second.
+    const prev = await lastLocation(trip.id);
+    const rejection = implausible(prev, { lat: data.lat, lng: data.lng, recordedAt });
+    if (rejection) {
+      // 202, not 4xx: the phone did nothing wrong and must NOT retry or queue
+      // this forever — we are simply declining to believe this one reading.
+      return res.status(202).json({ ok: true, stored: false, reason: rejection });
+    }
 
     await prisma.locationPoint.create({
       data: {
         tripId: trip.id,
         lat: data.lat, lng: data.lng,
         speed: data.speed, heading: data.heading,
+        accuracy: data.accuracy, held: data.held ?? false,
         source: 'PHONE',
-        recordedAt: data.recordedAt || new Date(),
+        recordedAt,
       },
     });
-    emitTrip(req, trip.id, 'trip:location', { lat: data.lat, lng: data.lng, speed: data.speed, heading: data.heading, at: new Date() });
-    res.status(201).json({ ok: true });
+    emitTrip(req, trip.id, 'trip:location', {
+      lat: data.lat, lng: data.lng, speed: data.speed, heading: data.heading,
+      accuracy: data.accuracy, held: data.held ?? false,
+      // The DEVICE's time, not ours. A queue draining after a signal blackout
+      // replays real positions from minutes ago; stamping them `now` told every
+      // watching parent the bus was teleporting through its own history.
+      at: recordedAt,
+    });
+    res.status(201).json({ ok: true, stored: true });
   })
 );
 
@@ -607,14 +717,20 @@ router.get(
         });
         const routeName = tripRoute?.name;
         // Newest 300, flipped back into order (asc+take took the OLDEST, so the
-        // parent's line froze at the start of the trip), then thinned.
+        // parent's line froze at the start of the trip), thinned, then snapped
+        // to the roads. `held: false` keeps a parked bus from eating the window
+        // with hundreds of copies of one position. Same cache as the admin view,
+        // so a class-worth of parents watching one bus costs one match.
         const trail = isLive
-          ? thinTrail(
-              (await prisma.locationPoint.findMany({
-                where: { tripId: t.id }, orderBy: { recordedAt: 'desc' }, take: 300,
-                select: { lat: true, lng: true },
-              })).reverse()
-            ).map((p) => [p.lng, p.lat])
+          ? (await matchedTrail(
+              t.id,
+              thinTrail(
+                (await prisma.locationPoint.findMany({
+                  where: { tripId: t.id, held: false }, orderBy: { recordedAt: 'desc' }, take: 300,
+                  select: { lat: true, lng: true, recordedAt: true, accuracy: true },
+                })).reverse()
+              )
+            )).map((p) => [p.lng, p.lat])
           : [];
 
         // The question a parent is actually asking: "how long until it matters

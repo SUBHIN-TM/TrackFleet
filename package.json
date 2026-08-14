@@ -15,7 +15,10 @@
     "dev:super": "npm run dev --workspace @trackfleet/super-admin",
     "db:migrate": "npm run db:migrate --workspace backend",
     "db:seed": "npm run db:seed --workspace backend",
-    "db:studio": "npm run db:studio --workspace backend"
+    "db:studio": "npm run db:studio --workspace backend",
+    "test": "npm run test:driver && npm run test:api",
+    "test:api": "npm run test --workspace backend",
+    "test:driver": "node --test 'apps/driver/src/**/*.test.js'"
   },
   "engines": {
     "node": ">=20"

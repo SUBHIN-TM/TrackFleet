@@ -7,6 +7,7 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
+    "test": "node --test 'src/**/*.test.js'",
     "start": "node src/server.js",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.9",
-    "prisma": "^5.22.0"
+    "prisma": "^5.22.0",
+    "socket.io-client": "^4.8.1"
   }
 }

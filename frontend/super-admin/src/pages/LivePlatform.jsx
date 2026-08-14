@@ -12,8 +12,12 @@ import MyLocationRoundedIcon from '@mui/icons-material/MyLocationRounded';
 import { api } from '../lib/api.js';
 import PageHeader from '../components/PageHeader.jsx';
 import PlatformMap from '../components/PlatformMap.jsx';
+import { useLivePosition } from '../lib/liveSocket.js';
 
 const POLL_MS = 5000;
+// The passenger board and trail change on a human timescale, not a GPS one.
+// Only used once positions are arriving pushed; otherwise POLL_MS still rules.
+const BOARD_POLL_MS = 15000;
 const P_STATUS = {
   EXPECTED: { label: 'Expected', color: 'default' },
   ONBOARD: { label: 'Onboard', color: 'success' },
@@ -47,6 +51,11 @@ export default function LivePlatform() {
     return () => clearInterval(timer.current);
   }, []);
 
+  // The opened bus reports its position pushed, the instant the driver's phone
+  // sends it. The platform BOARD above keeps its own 5s poll — that's every org
+  // at once, a genuinely different query, and not what this hook covers.
+  const { fix: pushedFix, live: pushLive } = useLivePosition(viewId);
+
   useEffect(() => {
     if (!viewId) { setLive(null); return; }
     const load = async () => {
@@ -56,11 +65,19 @@ export default function LivePlatform() {
       } catch { /* trip may have ended */ }
     };
     load();
-    const t = setInterval(load, POLL_MS);
+    // Positions arrive pushed, so this only carries the passenger board and the
+    // snapped trail. When the push channel is down it's the only source again.
+    const t = setInterval(load, pushLive ? BOARD_POLL_MS : POLL_MS);
     return () => clearInterval(t);
-  }, [viewId]);
+  }, [viewId, pushLive]);
 
-  const lastLoc = live?.lastLocation;
+  // Whichever fix was actually taken later — the push usually, but a poll can
+  // be ahead just after a reconnect. Newer wins whole: blending a fresh position
+  // with a stale speed describes no real moment.
+  const polledLoc = live?.lastLocation;
+  const lastLoc = !pushedFix ? polledLoc
+    : !polledLoc ? pushedFix
+    : new Date(pushedFix.recordedAt) >= new Date(polledLoc.recordedAt) ? pushedFix : polledLoc;
 
   return (
     <Box>

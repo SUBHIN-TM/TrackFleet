@@ -507,6 +507,24 @@ model LocationPoint {
   recordedAt DateTime // device timestamp (may differ from insert time if offline-buffered)
   createdAt DateTime @default(now())
 
+  // How much to trust lat/lng: the receiver's 68% confidence radius in metres.
+  // Null means the device didn't say. Without this the server cannot weight a
+  // point, re-filter a trail, or feed a map matcher — every fix looks equally
+  // good once it has landed, which is exactly when it matters that they aren't.
+  accuracy  Float?
+
+  // TRUE when the driver app decided the bus was parked and re-sent the anchor
+  // instead of the raw fix (see apps/driver/src/gpsFilter.js). The position is
+  // then a considered belief, not a measurement. An append-only safety trail
+  // must be able to tell the two apart when someone asks "where was the bus?".
+  held      Boolean  @default(false)
+
+  // NOTE: the road-snapped position is deliberately NOT stored here. Snapping
+  // needs the surrounding trace, which only exists after later points arrive —
+  // and back-filling it would mean UPDATEing this table, which rule #2 forbids.
+  // So the raw fix is the record, and the snap is computed on read (see
+  // lib/osrm.js osrmMatch + the per-trip cache in tripRoutes.js).
+
   @@index([tripId, recordedAt])
 }
 

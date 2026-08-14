@@ -15,8 +15,12 @@ import EventAvailableRoundedIcon from '@mui/icons-material/EventAvailableRounded
 import { api } from '../lib/api.js';
 import LiveMap from '../components/LiveMap.jsx';
 import { EtaHero, JourneyTimeline } from '../components/RideStatus.jsx';
+import { useLivePosition } from '../lib/liveSocket.js';
 
 const POLL_MS = 5000;
+// Boarding status and ETA change on a human timescale, not a GPS one. Only used
+// once positions are arriving pushed; otherwise POLL_MS still rules.
+const BOARD_POLL_MS = 15000;
 const DAYS = [['Mon', 1], ['Tue', 2], ['Wed', 3], ['Thu', 4], ['Fri', 5], ['Sat', 6], ['Sun', 7]];
 const daysLabel = (arr) => {
   const s = [...(arr || [])].sort((a, b) => a - b);
@@ -88,12 +92,16 @@ export default function ChildDetail() {
     } catch (err) { setError(err.response?.data?.error || 'Could not load'); }
   }
 
+  // The bus arrives pushed, the moment the driver's phone reports it. The poll
+  // below then only carries the slow half — boarding status, ETA, the trail.
+  const { fix: pushedFix, live: pushLive } = useLivePosition(t?.id || null);
+
   useEffect(() => {
     loadLive();
     api.get('/api/map/config').then(({ data }) => { setTileUrl(data.tileUrlTemplate); setStyleUrl(data.styleUrl || ''); }).catch(() => {});
-    timer.current = setInterval(loadLive, POLL_MS);
+    timer.current = setInterval(loadLive, pushLive ? BOARD_POLL_MS : POLL_MS);
     return () => clearInterval(timer.current);
-  }, []);
+  }, [pushLive]);
 
   // Per-child data reloads when the switcher changes.
   useEffect(() => {
@@ -104,7 +112,12 @@ export default function ChildDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const loc = t?.lastLocation;
+  // Whichever fix was actually taken later — the push usually, but a poll can
+  // be ahead just after a reconnect.
+  const polledLoc = t?.lastLocation;
+  const loc = !pushedFix ? polledLoc
+    : !polledLoc ? pushedFix
+    : new Date(pushedFix.recordedAt) >= new Date(polledLoc.recordedAt) ? pushedFix : polledLoc;
   const myStop = detail?.route?.stops?.find((s) => s.id === detail?.myStopId) || null;
 
   return (

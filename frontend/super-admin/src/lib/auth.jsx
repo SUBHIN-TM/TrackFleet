@@ -1,5 +1,6 @@
 import { createContext, useContext, useState } from 'react';
 import { api } from './api.js';
+import { closeLiveSocket } from './liveSocket.js';
 
 const AuthCtx = createContext(null);
 
@@ -22,6 +23,9 @@ export function AuthProvider({ children }) {
   function logout() {
     localStorage.removeItem('tf_token');
     localStorage.removeItem('tf_user');
+    // The live socket was authorized as THIS user at handshake time and still
+    // sits in their trip rooms. Dropping the token doesn't close it.
+    closeLiveSocket();
     setUser(null);
   }
 

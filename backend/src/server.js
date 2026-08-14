@@ -18,6 +18,7 @@ import tripRoutes from './routes/tripRoutes.js';
 import mapRoutes from './routes/mapRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import { verifyMailer } from './lib/mailer.js';
+import { attachRealtime } from './lib/realtime.js';
 
 const app = express();
 app.use(express.json());
@@ -116,14 +117,10 @@ const io = new SocketServer(server, {
   cors: { origin: corsOrigins.length ? corsOrigins : true },
 });
 
-io.on('connection', (socket) => {
-  // Clients join a room per trip so parents only get their bus, and admins a
-  // room per tenant for the whole-fleet live board.
-  socket.on('subscribe:trip', (tripId) => socket.join(`trip:${tripId}`));
-  socket.on('unsubscribe:trip', (tripId) => socket.leave(`trip:${tripId}`));
-  socket.on('subscribe:tenant', (tenantId) => socket.join(`tenant:${tenantId}`));
-  socket.on('unsubscribe:tenant', (tenantId) => socket.leave(`tenant:${tenantId}`));
-});
+// Authentication and per-room authorization live in lib/realtime.js — these
+// rooms carry live child-bus positions and must be no easier to join than the
+// REST endpoints serving the same data.
+attachRealtime(io);
 
 // Expose io to route handlers via app.locals
 app.locals.io = io;
