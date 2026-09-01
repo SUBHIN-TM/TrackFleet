@@ -4,8 +4,10 @@
   "private": true,
   "main": "index.js",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --dev-client",
+    "start:tunnel": "expo start --dev-client --tunnel",
     "android": "expo run:android",
+    "build:apk": "expo run:android --variant release --no-bundler",
     "ios": "expo run:ios"
   },
   "dependencies": {
@@ -15,6 +17,7 @@
     "babel-preset-expo": "~54.0.10",
     "expo": "~54.0.0",
     "expo-constants": "~18.0.13",
+    "expo-dev-client": "~6.0.21",
     "expo-location": "~19.0.8",
     "expo-status-bar": "~3.0.9",
     "expo-task-manager": "~14.0.9",

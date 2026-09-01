@@ -12,8 +12,30 @@ A step-by-step guide to start the project on your machine.
 | **Super Admin** | `npm run dev:super` | http://localhost:5173 | Your platform console — create/manage schools (green UI). |
 | **Admin** | `npm run dev:admin` | http://localhost:5174 | School admin portal — buses, drivers, students, routes (blue UI). |
 | **Database viewer** | `npm run db:studio` | http://localhost:5555 | Visual browser for the database tables (optional). |
+| **Driver app** | `cd apps/driver && npm start` | on your phone | React Native (Expo) app for drivers — needs a one-time build, see below. |
 
 > The **backend must always be running**, plus whichever website you want to open.
+
+---
+
+## The driver mobile app
+
+The driver app is **not** part of the `npm run dev:*` set — it is an Expo app in
+`apps/driver` with its own `package.json`, and it **cannot run in Expo Go**
+(it needs MapLibre and background location, which Expo Go does not bundle).
+
+Build it once onto a phone or emulator, then `npm start` behaves like any other
+dev server:
+
+```bash
+cd apps/driver
+npm install
+npm run android    # one time — compiles and installs the dev build
+npm start          # every day after that — QR + fast refresh
+```
+
+Full details, including pointing the app at your PC instead of production, are in
+`apps/driver/README.md`.
 
 ---
 
