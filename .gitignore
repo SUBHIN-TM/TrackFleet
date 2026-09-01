@@ -4,6 +4,7 @@ node_modules/
 .pnp.js
 
 # Env & secrets
+*.keystore
 .env
 .env.local
 .env.*.local
