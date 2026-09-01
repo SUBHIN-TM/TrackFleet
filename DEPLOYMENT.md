@@ -57,8 +57,16 @@ Only needed when code in `apps/driver/` changes.
 
 ### Step 1 — bump the version, in `D:\TrioDev\TrackFleet\apps\driver`
 
-Edit `app.json` → increase `"version"` (e.g. `1.0.0` → `1.0.1`), and in
-`android/app/build.gradle` increase `versionCode` (e.g. `1` → `2`).
+Edit `app.json` only — **both** values live there:
+
+```jsonc
+"version": "1.3.5",            // expo.version   — what the update banner compares
+"android": { "versionCode": 18 }  // must always increase, or Android refuses the install
+```
+
+> ⚠️ Do **not** edit `android/app/build.gradle`. `android/` is gitignored and
+> `expo prebuild` regenerates it, silently resetting `versionCode` to 1 — an APK
+> built that way is rejected on every driver's phone as a downgrade.
 
 ### Step 2 — build the APK, in `D:\TrioDev\TrackFleet\apps\driver\android`
 
@@ -85,7 +93,7 @@ skip this, drivers never learn there's a new build.
 ssh root@157.173.122.163 'cat > /var/www/trackfleet-app/downloads/driver-version.json <<EOF
 {
   "version": "1.0.4",
-  "versionCode": 5,
+  "versionCode": 18,
   "apkUrl": "https://trackfleet.360turningpoint.com/downloads/trackfleet-driver.apk",
   "notes": "What changed, in one line for the driver."
 }
