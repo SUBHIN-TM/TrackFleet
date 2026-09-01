@@ -24,20 +24,23 @@ function isNewer(remote, local) {
   return false;
 }
 
-// Returns { available, version, apkUrl, notes } — never throws: a failed check
-// must never block a driver from starting their trip.
+// Returns { ok, available, version, apkUrl, notes } — never throws: a failed
+// check must never block a driver from starting their trip. `ok` separates
+// "checked, you're current" from "couldn't reach the server", which otherwise
+// look identical and leave a driver falsely confident they're up to date.
 export async function checkForUpdate() {
   try {
     const res = await fetch(`${VERSION_URL}?t=${Date.now()}`); // bypass any cache
-    if (!res.ok) return { available: false };
+    if (!res.ok) return { ok: false, available: false };
     const v = await res.json();
     return {
+      ok: true,
       available: isNewer(v.version, APP_VERSION),
       version: v.version,
       apkUrl: v.apkUrl || `${API_URL}/downloads/trackfleet-driver.apk`,
       notes: v.notes,
     };
   } catch {
-    return { available: false };
+    return { ok: false, available: false };
   }
 }

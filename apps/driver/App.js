@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView, View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Alert, RefreshControl,
-  Linking,
+  Linking, AppState,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
@@ -141,7 +141,17 @@ function Home({ user, onLogout, onOpenTrip }) {
   useEffect(() => { load(); }, [load]);
 
   // Nothing updates a sideloaded APK on its own — tell the driver instead.
-  useEffect(() => { checkForUpdate().then(setUpdate); }, []);
+  //
+  // Checking only on mount was not enough: Android keeps this screen alive, so a
+  // driver who never fully closes the app (most of them) would sit on an old
+  // build forever without ever seeing the banner. Re-check on every foreground.
+  useEffect(() => {
+    checkForUpdate().then(setUpdate);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') checkForUpdate().then(setUpdate);
+    });
+    return () => sub.remove();
+  }, []);
 
   // Manual check, so a driver can confirm they're current instead of wondering.
   async function checkNow() {
@@ -149,7 +159,9 @@ function Home({ user, onLogout, onOpenTrip }) {
     const u = await checkForUpdate();
     setUpdate(u);
     setChecking(false);
-    if (!u.available) {
+    if (!u.ok) {
+      Alert.alert('Couldn’t check', 'No connection to the server. Your app may still be out of date — try again once you have signal.');
+    } else if (!u.available) {
       Alert.alert('You’re up to date', `TrackFleet Driver v${APP_VERSION} is the latest version.`);
     }
   }
